@@ -1,3 +1,14 @@
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, FunctionTransformer
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+
+
+import numpy as np
+
+import json
+
+
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 import pandas as pd
@@ -154,8 +165,4 @@ class TrimmColumns(BaseEstimator, TransformerMixin):
                     raise ValueError("Bruh")
         
         return X_transformed
-
-
-
-
 

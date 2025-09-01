@@ -1,0 +1,21 @@
+{
+    "y_column": [
+        "PRICE"
+    ],
+    "numeric_features": [
+        "AREA",
+        "BUILT_AREA",
+        "PRIVATE_AREA",
+        "LATITUDE",
+        "LONGITUDE",
+        "FLOOR",
+        "ROOMS",
+        "BATHROOMS",
+        "GARAGE"
+    ],
+    "categorical_features": [
+        "ANTIQUITY",
+        "STRATUM",
+        "BEDROOMS"
+    ]
+}
