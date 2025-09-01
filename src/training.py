@@ -18,7 +18,7 @@ def optimize_hyperparameters(objective_func, X_train, y_train):
     objective = partial(objective_func, X=X_train, y = y_train)
     
     # Use it like this:
-    study.optimize(objective, n_trials=4, n_jobs=4, show_progress_bar=True)
+    study.optimize(objective, n_trials=100, n_jobs=-1, show_progress_bar=True)
 
 
     best_params = study.best_params

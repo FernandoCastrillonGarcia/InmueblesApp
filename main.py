@@ -186,41 +186,46 @@ def get_total_pages(total_hits, rows):
 # ... existing code ...
 
 if __name__ == '__main__':
-    operation = 'Venta'
-    property = 'Apartamento'
-
-    operation_index = OPERATION_INDEX[operation]
-    property_index = PROPERTY_INDEX[property]
-    location = get_location('bogota')
-    rows = 50
     
-
-    # Fix: Get total hits first, then calculate pages
-    total_hits = get_total_hits(property_index, operation_index, location=location)
-    pages = get_total_pages(total_hits, rows)
-    
-    print(f"Total properties: {total_hits}, Total pages: {pages}")
-
     all_data = []
-    
-    # Fix: Add proper error handling and data collection
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [
-            executor.submit(get_hits, rows, page, property_index, operation_index, None, location) 
-            for page in range(1, pages + 1)
-        ]
-        
-        for future in tqdm(as_completed(futures), total=pages, desc="Fetching data"):
-            try:
-                result = future.result()
-                all_data.extend(result)  # Flatten the list
-            except Exception as e:
-                print(f"Error fetching page data: {e}")
+
+    operations = ['Arriendo']
+    properties = ['Apartamento','Apartaestudio']
+
+    for operation in operations:
+        for property in properties:
+            operation_index = OPERATION_INDEX[operation]
+            property_index = PROPERTY_INDEX[property]
+            location = get_location('bogota')
+            rows = 50
+            
+
+            # Fix: Get total hits first, then calculate pages
+            total_hits = get_total_hits(property_index, operation_index, location=location)
+            pages = get_total_pages(total_hits, rows)
+            
+            print(f"Operation: {operation}, Property: {property}")
+            print(f"Total properties: {total_hits}, Total pages: {pages}")
+
+            
+            # Fix: Add proper error handling and data collection
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [
+                    executor.submit(get_hits, rows, page, property_index, operation_index, None, location) 
+                    for page in range(1, pages + 1)
+                ]
+                
+                for future in tqdm(as_completed(futures), total=pages, desc="Fetching data"):
+                    try:
+                        result = future.result()
+                        all_data.extend(result)  # Flatten the list
+                    except Exception as e:
+                        print(f"Error fetching page data: {e}")
 
     # Fix: Create DataFrame from flattened data
     if all_data:
         df = pd.DataFrame(all_data)
-        df.to_csv('data_v1.csv', index=False, sep=';')
+        df.to_csv('data/data_v1.csv', index=False, sep=';')
         print(f"Successfully saved {len(df)} properties to data_v1.csv")
     else:
         print("No data collected")
