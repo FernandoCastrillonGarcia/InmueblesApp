@@ -1,12 +1,19 @@
 import requests
-from dotenv import load_dotenv
 from rich import print
 import os
 from tqdm import tqdm
 import pandas as pd
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExecutor
 
-load_dotenv()
+from database import QdrantSingleton
+
+from qdrant_client.models import PointStruct, VectorParams, Distance
+from embedding import embed, preprocess_text
+import uuid
+
+def create_uuid_from_string(input_data):
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, str(input_data)))
+
 
 
 OPERATION_INDEX = {
@@ -104,6 +111,18 @@ def get_total_hits(property_type_id, operation_type_id, projects=None, location=
     
     return response.get('hits',{'message':'No hay hits'}).get('total',{'message':'No hay total'}).get('value', -1)
 
+
+def hits_to_points(items):
+
+    descriptions = [preprocess_text(item.pop('DESCRIPTION')) for item in items]
+    ids = [create_uuid_from_string(item['WEB_PROPERTY_CODE']) for item in items]
+    vectors = embed(descriptions)
+
+
+    return [PointStruct(id=id, vector=vector, payload=item) for id, vector, item in zip(ids, vectors, items)]
+    
+
+
 def get_hits(rows, pages, property_type_id, operation_type_id, projects=None, location=None):
 
     URL =  "https://search-service.fincaraiz.com.co/api/v1/properties/search"
@@ -170,46 +189,58 @@ def get_hits(rows, pages, property_type_id, operation_type_id, projects=None, lo
             'PROPERTY_TYPE': INDEX_PROPERTY.get(property['property_type_id'],None),
             'OPERATION_TYPE': INDEX_OPERATION.get(property['operation_type_id'],None),
             'STRATUM': property['stratum'],
-            'BEDROOMS': property['bedrooms']
+            'BEDROOMS': property['bedrooms'],
+            'DESCRIPTION': property['description']
         }
 
 
         items.append(item)
 
-    return items
+    return hits_to_points(items)
 
-def get_total_pages(total_hits, rows):
+        
+def get_total_pages(total_hits, rows) -> int:
         pages = total_hits // rows
         if total_hits % rows > 0:
             pages += 1
         return pages
-# ... existing code ...
 
 if __name__ == '__main__':
     
-    all_data = []
-
     operations = ['Arriendo']
     properties = ['Apartamento','Apartaestudio']
 
+    total_points = 0
+    qdrant = QdrantSingleton().get_client()
     for operation in operations:
+        try:
+            qdrant.create_collection(operation,
+                vectors_config=VectorParams(
+                    size=768,
+                    distance=Distance.COSINE
+                ))
+        except Exception as e:
+            pass
+        
         for property in properties:
+
+            # REquest parameters
             operation_index = OPERATION_INDEX[operation]
             property_index = PROPERTY_INDEX[property]
             location = get_location('bogota')
-            rows = 50
+            rows = 32
             
 
-            # Fix: Get total hits first, then calculate pages
+            # Calcula el totald e páginas que necesita
             total_hits = get_total_hits(property_index, operation_index, location=location)
             pages = get_total_pages(total_hits, rows)
             
             print(f"Operation: {operation}, Property: {property}")
             print(f"Total properties: {total_hits}, Total pages: {pages}")
-
             
-            # Fix: Add proper error handling and data collection
-            with ThreadPoolExecutor(max_workers=10) as executor:
+            
+            # Requests en Multithreading
+            with ProcessPoolExecutor(max_workers=10) as executor:
                 futures = [
                     executor.submit(get_hits, rows, page, property_index, operation_index, None, location) 
                     for page in range(1, pages + 1)
@@ -218,19 +249,13 @@ if __name__ == '__main__':
                 for future in tqdm(as_completed(futures), total=pages, desc="Fetching data"):
                     try:
                         result = future.result()
-                        all_data.extend(result)  # Flatten the list
+                        
+                        qdrant.upsert(
+                            collection_name=operation,
+                            points=result
+                        )
+                        total_points += len(result)
+
                     except Exception as e:
                         print(f"Error fetching page data: {e}")
-
-    # Fix: Create DataFrame from flattened data
-    if all_data:
-        df = pd.DataFrame(all_data)
-        df.to_csv('data/data_v1.csv', index=False, sep=';')
-        print(f"Successfully saved {len(df)} properties to data_v1.csv")
-    else:
-        print("No data collected")
-
-
-    
-
-
+            print() 

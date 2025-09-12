@@ -1,30 +1,30 @@
+from functools import partial
+
 from sklearn.model_selection import cross_val_score
+from sklearn.metrics import make_scorer
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import ElasticNet
 from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
 
-
-from functools import partial
 import optuna
+
+from src.evaluate import median_absolute_percentage_error
 
 # Suppress Optuna's info messages
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 # Hyperparameters
 def optimize_hyperparameters(objective_func, X_train, y_train):
-    study = optuna.create_study(direction='maximize', sampler=optuna.samplers.RandomSampler(seed=42)) # Default is random Search
+    study = optuna.create_study(direction='minimize', sampler=optuna.samplers.RandomSampler(seed=42)) # Default is random Search
 
     objective = partial(objective_func, X=X_train, y = y_train)
     
     # Use it like this:
-    study.optimize(objective, n_trials=100, n_jobs=-1, show_progress_bar=True)
-
+    study.optimize(objective, n_trials=50, n_jobs=-1, show_progress_bar=True)
 
     best_params = study.best_params
-    best_score = study.best_value
-    print(f' Best score : {best_score}')
-    return best_params, best_score
+    return best_params
 
 # Objective functions 
 def objective_random_forest(trial, X = None, y = None):
@@ -39,7 +39,7 @@ def objective_random_forest(trial, X = None, y = None):
     min_samples_split=min_samples_split,
     min_samples_leaf=min_samples_leaf)
 
-    score = cross_val_score(model, X, y, n_jobs=-1, cv=5, scoring='neg_mean_absolute_error').mean()
+    score = cross_val_score(model, X, y, n_jobs=-1, cv=5, scoring=make_scorer(median_absolute_percentage_error)).mean()
 
     return score
 
@@ -63,7 +63,7 @@ def objective_xgboost(trial, X = None, y = None):
     model = XGBRegressor(**params)
 
     score = cross_val_score(model, X, y.ravel(), cv=5, 
-                               scoring='neg_mean_absolute_error', n_jobs=1).mean()
+                               scoring=make_scorer(median_absolute_percentage_error), n_jobs=1).mean()
 
     return score
 
@@ -86,7 +86,7 @@ def objective_lightgbm(trial, X = None, y = None):
     model = LGBMRegressor(**params)
 
     score = cross_val_score(model, X, y.ravel(), cv=5, 
-                           scoring='neg_mean_absolute_error', n_jobs=1).mean()
+                           scoring=make_scorer(median_absolute_percentage_error), n_jobs=1).mean()
     return score
 
 def objective_elastic_net(trial, X=None, y=None):
@@ -101,5 +101,5 @@ def objective_elastic_net(trial, X=None, y=None):
     model = ElasticNet(**params)
 
     score = cross_val_score(model, X, y.ravel(), cv=5, 
-                           scoring='neg_mean_absolute_error', n_jobs=1).mean()
+                           scoring=make_scorer(median_absolute_percentage_error), n_jobs=1).mean()
     return score

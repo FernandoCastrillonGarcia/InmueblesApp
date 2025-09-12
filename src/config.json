@@ -11,11 +11,12 @@
         "FLOOR",
         "ROOMS",
         "BATHROOMS",
-        "GARAGE"
+        "GARAGE",
+        "STRATUM",
+        "BEDROOMS"
     ],
     "categorical_features": [
         "ANTIQUITY",
-        "STRATUM",
-        "BEDROOMS"
+        "PROPERTY_TYPE"
     ]
 }

@@ -166,3 +166,9 @@ class TrimmColumns(BaseEstimator, TransformerMixin):
         
         return X_transformed
 
+def clip_outliers(y, percentile=95):
+    """Clip values above the specified percentile."""
+    upper_limit = np.percentile(y, percentile)
+    return np.clip(y, a_min=None, a_max=upper_limit)
+
+
