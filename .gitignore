@@ -15,4 +15,5 @@ wheels/
 # Data types
 *.csv
 data/
+qdrant_storage/
 models/

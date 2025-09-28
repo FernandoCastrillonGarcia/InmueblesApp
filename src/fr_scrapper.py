@@ -14,8 +14,6 @@ import uuid
 def create_uuid_from_string(input_data):
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, str(input_data)))
 
-
-
 OPERATION_INDEX = {
     'Venta': 1,
     'Arriendo': 2
@@ -118,10 +116,8 @@ def hits_to_points(items):
     ids = [create_uuid_from_string(item['WEB_PROPERTY_CODE']) for item in items]
     vectors = embed(descriptions)
 
-
     return [PointStruct(id=id, vector=vector, payload=item) for id, vector, item in zip(ids, vectors, items)]
     
-
 
 def get_hits(rows, pages, property_type_id, operation_type_id, projects=None, location=None):
 
@@ -190,28 +186,33 @@ def get_hits(rows, pages, property_type_id, operation_type_id, projects=None, lo
             'OPERATION_TYPE': INDEX_OPERATION.get(property['operation_type_id'],None),
             'STRATUM': property['stratum'],
             'BEDROOMS': property['bedrooms'],
-            'DESCRIPTION': property['description']
+            'DESCRIPTION': property['description'],
+            'LINK': 'https://www.fincaraiz.com.co'+property['link'],
+            # 'FUNCIONA': True # Si el coso esta en funca raiz, pues en teoria está funcionando
         }
-
 
         items.append(item)
 
     return hits_to_points(items)
 
-        
+      
 def get_total_pages(total_hits, rows) -> int:
         pages = total_hits // rows
         if total_hits % rows > 0:
             pages += 1
         return pages
 
+
+
 if __name__ == '__main__':
+
+    LOCAL = True
     
     operations = ['Arriendo']
     properties = ['Apartamento','Apartaestudio']
 
     total_points = 0
-    qdrant = QdrantSingleton().get_client()
+    qdrant = QdrantSingleton(local = LOCAL).get_client()
     for operation in operations:
         try:
             qdrant.create_collection(operation,
@@ -230,14 +231,12 @@ if __name__ == '__main__':
             location = get_location('bogota')
             rows = 32
             
-
             # Calcula el totald e páginas que necesita
             total_hits = get_total_hits(property_index, operation_index, location=location)
             pages = get_total_pages(total_hits, rows)
             
             print(f"Operation: {operation}, Property: {property}")
             print(f"Total properties: {total_hits}, Total pages: {pages}")
-            
             
             # Requests en Multithreading
             with ProcessPoolExecutor(max_workers=10) as executor:
@@ -258,4 +257,4 @@ if __name__ == '__main__':
 
                     except Exception as e:
                         print(f"Error fetching page data: {e}")
-            print() 
+            print()
