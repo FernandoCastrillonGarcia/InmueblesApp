@@ -107,7 +107,6 @@ class DropNullColumns(BaseEstimator, TransformerMixin):
         
         return X_transformed
     
-
 class TrimmColumns(BaseEstimator, TransformerMixin):
     """
     

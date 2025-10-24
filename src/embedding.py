@@ -23,8 +23,10 @@ def embed(text:list[str] | str)->list[list[float]]:
         input = preprocess_text(text)
 
     # Configure Ollama client with host from environment variable
-    ollama_host = os.getenv('OLLAMA_HOST', 'localhost:11434')
-    client = ollama.Client(host=f'http://{ollama_host}')
+    
+    ollama_host = os.getenv('OLLAMA_HOST', 'https://localhost:11434')
+    
+    client = ollama.Client(host=ollama_host)
     
     return client.embed(model = 'nomic-embed-text', input = input)['embeddings']
 

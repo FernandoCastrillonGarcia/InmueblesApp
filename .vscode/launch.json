@@ -1,0 +1,41 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Typer - Train XGBoost",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/workflow.py",
+            "args": ["train", "--model", "xgboost"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Debug Typer - Train LightGBM",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/workflow.py",
+            "args": ["train", "-m", "lightgbm"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Debug Typer - Compare All",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/workflow.py",
+            "args": ["train", "--compare"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Debug Typer - Info",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/workflow.py",
+            "args": ["info"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

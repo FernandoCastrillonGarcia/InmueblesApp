@@ -9,7 +9,7 @@ from lightgbm import LGBMRegressor
 
 import optuna
 
-from src.evaluate import median_absolute_percentage_error
+from evaluate import median_absolute_percentage_error
 
 # Suppress Optuna's info messages
 optuna.logging.set_verbosity(optuna.logging.WARNING)
