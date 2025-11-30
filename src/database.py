@@ -13,7 +13,7 @@ class QdrantSingleton:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-    
+
     def __init__(self, local: bool = False):
         if self._client is None:
             self._is_local = local

@@ -1,7 +1,6 @@
-import typer
-from typing import Optional
 from enum import Enum
-from pipelines.training import price_prediction_pipeline
+
+import typer
 
 # Define valid model types as Enum for better autocomplete and validation
 class ModelType(str, Enum):
@@ -14,6 +13,29 @@ app = typer.Typer(
     help="🏠 InmueblesApp ML Training Pipeline - Train price prediction models",
     add_completion=False
 )
+
+@app.command()
+def scrape():
+    """
+    Scrape property data from website.
+    
+    Example:
+        python src/workflow.py scrape
+    """
+    from pipelines.scrapping.pipeline import scraping_pipeline
+    
+    typer.secho("🔍 Starting scraping pipeline...", fg=typer.colors.CYAN, bold=True)
+    
+    try:
+        # Run pipeline - outputs stored as artifacts
+        scraping_pipeline()
+        
+        typer.secho(f"✅ Scraping completed!", fg=typer.colors.GREEN, bold=True)
+        typer.secho("📊 Check data/raw/ for CSV and ZenML dashboard for details", fg=typer.colors.BLUE)
+        
+    except Exception as e:
+        typer.secho(f"❌ Scraping failed: {e}", fg=typer.colors.RED, bold=True, err=True)
+        raise typer.Exit(code=1)
 
 @app.command()
 def train(
@@ -50,6 +72,7 @@ def train(
         # Train all models for comparison
         python src/workflow.py train --compare
     """
+    from pipelines.training.pipeline import price_prediction_pipeline
     
     if compare:
         typer.secho("🔄 Training all models for comparison...", fg=typer.colors.CYAN, bold=True)
