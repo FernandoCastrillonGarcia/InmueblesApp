@@ -14,7 +14,13 @@ wheels/
 
 # Data types
 *.csv
+*.parquet
+
 data/
 qdrant_storage/
+
+mlruns/
 models/
+
+# sh things
 cloud-setting.sh
