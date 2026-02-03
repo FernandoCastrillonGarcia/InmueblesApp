@@ -25,13 +25,13 @@ with col2:
     st.markdown("#### 💰 Predecir Precio")
     st.write("Estima el precio de una propiedad")
     if st.button("Ir a Predicción", key="predict"):
-        st.error('En pausa')
+        st.switch_page("pages/prediction.py")
 
 with col3:
     st.markdown("#### 📊 Explorar Datos")
     st.write("Analiza el mercado inmobiliario")
     if st.button("Ir a Análisis", key="explore"):
-        st.error('En pausa')
+        st.switch_page("pages/monitoring.py")
         
 
 # Quick stats

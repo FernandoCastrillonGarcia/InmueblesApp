@@ -27,7 +27,7 @@ INDEX_ANTIQUITY = {value:key for key, value in ANTIQUITY_INDEX.items()}
 
 LOCAL = True
 
-def get_location(query:str):
+def get_location(query:str)->dict:
     url = "https://search-service.fincaraiz.com.co/api/v1/locations/infofinca-autocomplete"
 
     payload = {
@@ -55,7 +55,7 @@ def get_location(query:str):
 
     }
 
-def get_total_hits(property_type_id, operation_type_id, projects=None, location=None):
+def get_total_hits(property_type_id, operation_type_id, projects=None, location=None)->dict:
     url =  "https://search-service.fincaraiz.com.co/api/v1/properties/search"
 
     payload = {
@@ -98,7 +98,7 @@ def get_total_hits(property_type_id, operation_type_id, projects=None, location=
     
     return response.get('hits',{'message':'No hay hits'}).get('total',{'message':'No hay total'}).get('value', -1)
 
-def hits_to_points(items):
+def hits_to_points(items)->list[PointStruct]:
 
     descriptions = [preprocess_text(item.pop('DESCRIPTION')) for item in items]
     ids = [create_uuid_from_string(item['WEB_PROPERTY_CODE']) for item in items]
@@ -106,7 +106,7 @@ def hits_to_points(items):
 
     return [PointStruct(id=id, vector=vector, payload=item) for id, vector, item in zip(ids, vectors, items)]
     
-def get_hits(rows, pages, property_type_id, operation_type_id, projects=None, location=None):
+def get_hits(rows, pages, property_type_id, operation_type_id, projects=None, location=None)->list[dict]:
 
     url =  "https://search-service.fincaraiz.com.co/api/v1/properties/search"
 
@@ -155,6 +155,7 @@ def get_hits(rows, pages, property_type_id, operation_type_id, projects=None, lo
         property = hit['_source']['listing']
 
         item = {
+            'SOURCE': 'Finca Raiz',
             'WEB_PROPERTY_CODE': property['id'],
             'PRICE': property['price']['amount'],
             'PRICE_ADMIN_INCLUDED': property['price']['admin_included'],

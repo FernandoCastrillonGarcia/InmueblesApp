@@ -1,8 +1,18 @@
 from sklearn.model_selection import cross_val_score
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import ElasticNet
 from sklearn.metrics import make_scorer
 
-from evaluate import median_absolute_percentage_error
+from .evaluate import median_absolute_percentage_error
+
+from functools import partial
+import optuna
+
+from lightgbm import LGBMRegressor
+from xgboost import XGBRegressor
+
+# Suppress Optuna's info messages
+optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 # Objective functions 
 def objective_random_forest(trial, X = None, y = None):
@@ -68,6 +78,7 @@ def objective_lightgbm(trial, X = None, y = None):
     return score
 
 def objective_elastic_net(trial, X=None, y=None):
+
     params = {
         'alpha': trial.suggest_float('alpha', 1e-4, 10, log=True),
         'l1_ratio': trial.suggest_float('l1_ratio', 0.1, 0.9),
@@ -81,3 +92,17 @@ def objective_elastic_net(trial, X=None, y=None):
     score = cross_val_score(model, X, y.ravel(), cv=5, 
                            scoring=make_scorer(median_absolute_percentage_error), n_jobs=1).mean()
     return score
+
+
+# Hyperparameters
+def optimize_hyperparameters(objective_func, X_train, y_train):
+    study = optuna.create_study(direction='minimize', sampler=optuna.samplers.RandomSampler(seed=42)) # Default is random Search
+
+    objective = partial(objective_func, X=X_train, y = y_train)
+    
+    # Use it like this:
+    study.optimize(objective, n_trials=50, n_jobs=-1, show_progress_bar=True)
+
+    best_params = study.best_params
+    
+    return best_params

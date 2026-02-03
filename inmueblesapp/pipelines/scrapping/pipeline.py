@@ -6,11 +6,10 @@ def scraping_pipeline():
     """Pipeline to scrape property data"""
     
     operations = ['Arriendo']
-    property_types = ['Apartamento', 'Apartaestudio']
+    property_types = ['Casa', 'Apartamento']
     
     # Step 1 Scrape Finca Raiz properties
-    # results = scrape_properties(operations, property_types)
-    df, stats = steps.scrape_properties(operations, property_types)
+    stats = steps.scrape_properties(operations, property_types)
 
     # Step 2 Create the signature
     steps.validate_scrapping_signature(stats)
