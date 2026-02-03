@@ -10,7 +10,7 @@ import pandas as pd
 
 from pipelines.scrapping.src.finca_raiz import OPERATION_INDEX, PROPERTY_INDEX, LOCAL
 import pipelines.scrapping.src.finca_raiz as fr
-# from database import QdrantSingleton
+from database import MongoSingleton
 # Log to MLflow
 import mlflow
 
@@ -23,13 +23,19 @@ from typing import Annotated, Tuple
 def scrape_properties(
     operations:list[str],
     properties:list[str]
-)-> Tuple[Annotated[pd.DataFrame, 'points'],Annotated[pd.DataFrame, 'stats']]:
+)-> Annotated[pd.DataFrame, 'stats']:
 
-    # qdrant = QdrantSingleton(local = LOCAL).get_client()
-    all_items = []
+    mongo_client = MongoSingleton.get_client()
+    db = mongo_client["inmuebles_db"]
+    collection = db["properties"]
+
     all_stats = []
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    scrape_time = datetime.now()
+
     for operation in operations:
+
+        all_items = []
 
         # create collection if it doesn't exist
         # try:
@@ -43,7 +49,7 @@ def scrape_properties(
         
         for property in properties:
 
-            # REquest parameters
+            # Request parameters
             operation_index = OPERATION_INDEX[operation]
             property_index = PROPERTY_INDEX[property]
             location = fr.get_location('bogota')
@@ -70,11 +76,14 @@ def scrape_properties(
                     try:
                         items = future.result()
 
-                        # points = hits_to_points(items)                    
-                        # qdrant.upsert(
-                        #     collection_name=operation,
-                        #     points=points
-                        # )
+                        if items:
+                            # Add timestamp to items
+                            for item in items:
+                                item['scraped_at'] = scrape_time
+                                item['batch_id'] = timestamp
+                            
+                            # Insert into MongoDB
+                            collection.insert_many(items)
 
                         total_points += len(items)
                         success_count += 1
@@ -84,6 +93,13 @@ def scrape_properties(
                         failure_count += 1
                         print(f"Error fetching page data: {e}")
             print()
+
+            df = pd.DataFrame(all_items)
+
+            df['LATITUDE'] = pd.to_numeric(df['LATITUDE'], errors='coerce')
+            df['LONGITUDE'] = pd.to_numeric(df['LONGITUDE'], errors='coerce')
+            df['PRICE'] = pd.to_numeric(df['PRICE'], errors='coerce')
+            df['AREA'] = pd.to_numeric(df['AREA'], errors='coerce')
 
             # Return statistics
             signature = {
@@ -96,6 +112,10 @@ def scrape_properties(
                 "pages_success": success_count,
                 "pages_failed": failure_count,
                 "success_rate": success_count / (success_count + failure_count) * 100,
+
+                # numeric statistics
+                'total_properties':len(df.loc[df['PROPERTY_TYPE'] == property]),
+                'mean_price': df.loc[df['PROPERTY_TYPE'] == property, 'PRICE'].mean(),
             }
 
             all_stats.append(signature)
@@ -103,18 +123,22 @@ def scrape_properties(
     # Logging stats
     stats = pd.DataFrame(all_stats)
 
-    # Storing Data
-    df = pd.DataFrame(all_items)
+    # TODO: DEPRECATED csv storage
+    # # Storing Data
+    # df = pd.DataFrame(all_items)
 
-    df['LATITUDE'] = pd.to_numeric(df['LATITUDE'], errors='coerce')
-    df['LONGITUDE'] = pd.to_numeric(df['LONGITUDE'], errors='coerce')
-    df['PRICE'] = pd.to_numeric(df['PRICE'], errors='coerce')
-    df['AREA'] = pd.to_numeric(df['AREA'], errors='coerce')
+    # df['LATITUDE'] = pd.to_numeric(df['LATITUDE'], errors='coerce')
+    # df['LONGITUDE'] = pd.to_numeric(df['LONGITUDE'], errors='coerce')
+    # df['PRICE'] = pd.to_numeric(df['PRICE'], errors='coerce')
+    # df['AREA'] = pd.to_numeric(df['AREA'], errors='coerce')
     
-    # Save with timestamp
-    df.to_csv(f"data/raw/properties_{timestamp}.csv", index=False)
+    # # Save with timestamp (Deprecated in favor of MongoDB)
+    # df.to_csv(f"data/raw/properties_{timestamp}.csv", index=False)
 
-    return df, stats
+
+    print(f"✅ Stored {len(all_items)} properties in MongoDB")
+
+    return stats
 
 @step(experiment_tracker = "mlflow_tracker")
 def validate_scrapping_signature(
@@ -135,10 +159,22 @@ def validate_scrapping_signature(
         return current_stats  # Return as-is
     
     # Get previous stats
-    previous_run = runs[1]  # Second latest
-    previous_step = previous_run.steps["scrape_properties"]
+
+    tries = 1
+
+    while tries < 5:
+        try:
+            previous_run = runs[tries]  
+            previous_step = previous_run.steps["scrape_properties"]
+            
+            previous_stats = previous_step.outputs["stats"][0].load()
+            break
+        except KeyError:
+            tries += 1
     
-    previous_stats = previous_step.outputs["stats"][0].load()
+    if tries == 5:
+        raise Exception('Despue de 5 intentos hubo un fallo. Hay que revisar')
+
 
     comparison = current_stats.merge(
         previous_stats,
@@ -147,7 +183,11 @@ def validate_scrapping_signature(
         how='outer'  # Include new/removed distributions
     )
 
-    comparison["delta_success"] = comparison['pages_success_current'] - comparison['pages_success_previous']
-    comparison["delta_failed"] = comparison['pages_failed_current'] - comparison['pages_failed_previous']
+    # Scrapping process comparions
+    comparison["pages_success_delta"] = comparison['pages_success_current'] - comparison['pages_success_previous']
+    comparison["pages_failed_delta"] = comparison['pages_failed_current'] - comparison['pages_failed_previous']
 
-    return comparison[['delta_success', 'delta_failed']]
+    comparison["mean_price_delta"] = comparison['mean_price_current'] - comparison['mean_price_previous']
+    comparison["total_properties_delta"] = comparison['total_properties_current'] - comparison['total_properties_previous']
+
+    return comparison

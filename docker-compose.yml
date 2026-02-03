@@ -6,38 +6,31 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
-  ollama:
-    image: ollama/ollama
-    volumes:
-      - ollama_data:/root/.ollama
-    entrypoint: ["/bin/sh", "-c"]
-    command: >
-      "ollama serve &
-       sleep 10 &&
-       ollama pull nomic-embed-text &&
-       wait"
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    env_file:
-      - .env
-
   streamlit:
     build: .
     ports:
       - "8501:8501"
     depends_on:
-      ollama:
-        condition: service_healthy
       qdrant:
         condition: service_started
     env_file:
       - .env
     restart: unless-stopped
 
+  serving:
+    build:
+      context: .
+      dockerfile: Dockerfile.serving
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./mlruns:/app/mlruns
+    environment:
+      - MLFLOW_TRACKING_URI=file:///app/mlruns
+    env_file:
+      - .env
+    restart: unless-stopped
+
 volumes:
-  ollama_data:
   qdrant_data:
+  

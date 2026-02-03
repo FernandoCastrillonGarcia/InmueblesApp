@@ -1,0 +1,35 @@
+FROM python:3.13-slim
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+WORKDIR /app
+
+# Install build dependencies for python-rapidjson and others
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    gcc \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy dependency files
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies using uv
+RUN uv sync --frozen --no-dev
+
+# Copy the app package
+COPY inmueblesapp/ ./inmueblesapp/
+
+# Expose port
+EXPOSE 8000
+
+# Set python path so inmueblesapp can be imported
+# We add /app/inmueblesapp so that 'pipelines' can be imported as a top-level module
+# (which is how it was likely pickled during training)
+ENV PYTHONPATH=/app:/app/inmueblesapp
+
+# Use uv to run the application
+CMD ["uv", "run", "uvicorn", "inmueblesapp.serving.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+

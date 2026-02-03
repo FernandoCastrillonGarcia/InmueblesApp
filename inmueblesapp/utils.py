@@ -4,7 +4,7 @@ import numpy as np
 import uuid
 from database import QdrantSingleton
 
-import ollama
+from fastembed import TextEmbedding
 import re
 import os
 from database import QdrantSingleton
@@ -26,15 +26,16 @@ def embed(text:list[str] | str)->list[list[float]]:
     if isinstance(text,list):
         input = [preprocess_text(t) for t in text]
     else:
-        input = preprocess_text(text)
+        input = [preprocess_text(text)]
 
-    # Configure Ollama client with host from environment variable
+    # Use FastEmbed directly
+    embedding_model = TextEmbedding(model_name="nomic-ai/nomic-embed-text-v1.5")
     
-    ollama_host = os.getenv('OLLAMA_HOST', 'https://localhost:11434')
+    # FastEmbed returns a generator, convert to list
+    embeddings = list(embedding_model.embed(input))
     
-    client = ollama.Client(host=ollama_host)
-    
-    return client.embed(model = 'nomic-embed-text', input = input)['embeddings']
+    # FastEmbed returns numpy arrays, convert to list of floats
+    return [e.tolist() for e in embeddings]
 
 
 def query(text:str, payload:[dict] = None, limit = 10, local=True)->list:
