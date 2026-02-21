@@ -1,11 +1,13 @@
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
-from embedding import query
+import os
+from utils import query
 from streamlit import session_state as ss
-from database import QdrantSingleton
+from database import QdrantSingleton, MongoSingleton
 from utils import create_color_palette
-from qdrant_client.models import FieldCondition, MatchValue, Range
+from qdrant_client.models import FieldCondition, MatchValue, Range, PayloadSchemaType
+from pymongo import ASCENDING, DESCENDING
 
 st.set_page_config(
     page_title="Recomendaciones",
@@ -13,9 +15,20 @@ st.set_page_config(
     layout="centered"
 )
 
-LOCAL = False
+
+LOCAL = os.getenv("LOCAL", "true").lower() == "true"
 # ================ Extracción de constantes ======================
-property_types_list = ["Apartamento", "Apartaestudio", "Casa"]
+qdrant_client = QdrantSingleton(local=LOCAL).get_client()
+mongo_client = MongoSingleton(local=LOCAL).get_client()
+mongo_db = mongo_client["inmuebles_db"]
+
+
+property_types_list = [
+    'Casa','Apartamento','Lote','Local','Oficina','Finca','Parqueadero',
+    'Consultorio','Edificio','Apartaestudio','Cabaña', 'Casa Campestre',
+    'Casa Lote','Habitación','Bodega'
+]
+
 operation_types_list = ["Arriendo", "Venta"]
 
 # Header
@@ -32,39 +45,54 @@ with st.sidebar:
     if st.button("💰 Predecir Precio"):
         st.switch_page("pages/prediction.py")
     if st.button("📊 Explorar Datos"):
-        st.switch_page("pages/analytics.py")
+        st.switch_page("pages/monitoring.py")
     
     st.divider()
-    
-    # Search filters
-    st.header("Filtros")
-    operation = st.selectbox("Operación", operation_types_list)
-    property_type = st.selectbox("Tipo", property_types_list)
-    max_results = st.slider("Máximo resultados", 5, 50, 10)
+  
+
+st.header("Busca tu propiedad")
+c1,c2,c3 = st.columns(3)
+operation = c1.selectbox("Operación", operation_types_list)
+property_type = c2.selectbox("Tipo", property_types_list)
+max_results = c3.number_input("Máximo resultados", 5, 50, 10)
+
+@st.cache_data(ttl=300)
+def get_field_bounds(collection_name: str, property_type: str, field: str) -> tuple[int, int]:
+    """Get min/max of a numeric field from MongoDB, filtered by PROPERTY_TYPE."""
+    query_filter = {"PROPERTY_TYPE": property_type, field: {"$exists": True, "$type": "number"}}
+    min_doc = mongo_db[collection_name].find_one(query_filter, {field: 1}, sort=[(field, ASCENDING)])
+    max_doc = mongo_db[collection_name].find_one(query_filter, {field: 1}, sort=[(field, DESCENDING)])
+    if min_doc and max_doc:
+        return int(min_doc[field]), int(max_doc[field])
+    return 0, 1  # fallback
+
+with st.expander('Filtros adicionales'):
 
     # Filtros generales
     keys = ["BUILT_AREA", "GARAGE", "BATHROOMS", "ROOMS"]
-    from qdrant_client.models import PayloadSchemaType
-    schemas = [PayloadSchemaType.FLOAT] + ([PayloadSchemaType.INTEGER]*3)
+    labels = ["Área construida en m²", "Número de habitaciones", "Número de Baños", "Número de Parqueaderos"]
+    schemas = [PayloadSchemaType.FLOAT] + ([PayloadSchemaType.INTEGER] * 3)
+    steps = [10, 1, 1, 1]
+
     ranges = []
-    with st.expander("Generales"):
-        ranges.append(st.slider("Area construida en m²", 0, 1200, (30, 60),step=10))
-        ranges.append(st.slider("Número de habitaciones", 0, 10, (2,3),step=1))
-        ranges.append(st.slider("Número de Baños", 0, 10, (2,3),step=1))
-        ranges.append(st.slider("Número de Parqueaderos", 0, 5, (2,3),step=1))
-    
+    for key, label, step_val in zip(keys, labels, steps):
+        lo, hi = get_field_bounds(operation, property_type, key)
+        # Default selection: 25% and 75% of the range
+        default_lo = lo + (hi - lo) // 4
+        default_hi = lo + 3 * (hi - lo) // 4
+        ranges.append(st.slider(label, lo, max(hi, lo + 1), (default_lo, default_hi), step=step_val))
+
     must_condition = []
     for range_tuple, key, schema in zip(ranges, keys, schemas):
         must_condition.append(FieldCondition(key=key, range=Range(gte=range_tuple[0], lte=range_tuple[1])))
-        client = QdrantSingleton(local=LOCAL).get_client()
-        # client.create_payload_index(
-        #     collection_name="Arriendo",
-        #     field_name=key,
-        #     field_schema=schema
-        # )
 
+        qdrant_client.create_payload_index(
+            collection_name=operation,
+            field_name=key,
+            field_schema=schema
+        )
 
-    n_floor = st.number_input("Ubicación del piso", 0, 30, 3,step=1)
+    n_floor = st.number_input("Ubicación del piso", 0, 30, 3, step=1)
 
 
     if "query_payload" not in ss:
@@ -73,8 +101,6 @@ with st.sidebar:
         'must':must_condition
     }
 
-
-st.markdown("### Describe tu propiedad ideal")
 
 ss.search_text = st.text_area(
     "Escribe aquí...",
@@ -85,9 +111,8 @@ ss.search_text = st.text_area(
 search_button = st.button("🔍 Buscar Propiedades", type="primary", use_container_width=True)    
 # Results summary (placeholder)
 if search_button and ss.search_text:
-
     
-    ss.points = query(ss.search_text, payload=ss.query_payload, limit=max_results,local=LOCAL)
+    ss.points = query(ss.search_text, collection_name=operation, payload=ss.query_payload, limit=max_results, local=LOCAL)
 
 st.markdown("### Mapa de Resultados")    
 # Create folium map (Bogotá center)
@@ -107,18 +132,27 @@ for i, point in enumerate(ss.points):
     link = point.payload.get('LINK', '#')
     if link and not link.startswith(('http://', 'https://')):
         link = f"https://{link}"
-    
+
     folium.Marker(
         location=[point.payload['LATITUDE'], point.payload['LONGITUDE']],
         popup=folium.Popup(
+            f"<b>#{i+1}</b><br>" # TODO: cambiar por el titulo
             f"<b>Precio:</b> ${point.payload.get('PRICE', 'N/A'):,}<br>"
             f"<b>Área:</b> {point.payload.get('AREA', 'N/A')} m²<br>"
             f"<b>Habitaciones:</b> {point.payload.get('ROOMS', 'N/A')}<br>"
             f"<b>Enlace:</b> <a href='{link}' target='_blank'>Ver propiedad</a>",
             max_width=200
         ),
-        tooltip=f"${point.payload.get('PRICE', 'N/A'):,}",
-        icon=folium.Icon(color='blue',icon_color='white', icon='home', prefix='fa')
+        tooltip=f"#{i+1} - ${point.payload.get('PRICE', 'N/A'):,}",
+        icon=folium.DivIcon(
+            icon_size=(30, 30),
+            icon_anchor=(15, 15),
+            html=f'<div style="background-color:#4285F4; color:white; border-radius:50%; '
+                 f'width:30px; height:30px; display:flex; align-items:center; '
+                 f'justify-content:center; font-weight:bold; font-size:14px; '
+                 f'border:2px solid white; box-shadow:0 2px 4px rgba(0,0,0,0.3);">'
+                 f'{i+1}</div>'
+        )
     ).add_to(m)
 # Display map
 map_data = st_folium(m, width=700, height=500, returned_objects=[])
