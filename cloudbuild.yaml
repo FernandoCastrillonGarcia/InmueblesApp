@@ -1,115 +1,77 @@
-# Cloud Build configuration for Inmuebles App
+# ============================================================
+#  Cloud Build — build + deploy Serving & Streamlit to Cloud Run
+#  Triggered manually or by CI/CD on push to main.
+# ============================================================
 steps:
-  # Build Ollama service
+  # ── Build (parallel) ──────────────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'
-    id: 'build-ollama'
-    args: 
-      - 'build'
-      - '-f'
-      - 'Dockerfile.ollama'
-      - '-t'
-      - 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/ollama-service:latest'
-      - '.'
-  
-  # Build Streamlit service
+    id: 'build-serving'
+    args: ['build', '-f', 'Dockerfile.serving', '-t',
+           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving:$SHORT_SHA', '-t',
+           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving:latest', '.']
+
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build-streamlit'
-    args: 
-      - 'build'
-      - '-f'
-      - 'Dockerfile.streamlit'
-      - '-t'
-      - 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:latest'
-      - '.'
-  
-  # Push Ollama image
+    args: ['build', '-f', 'Dockerfile.streamlit', '-t',
+           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:$SHORT_SHA', '-t',
+           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:latest', '.']
+
+  # ── Push (parallel) ──────────────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'
-    id: 'push-ollama'
-    args: 
-      - 'push'
-      - '--all-tags'
-      - 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/ollama-service'
-    waitFor: ['build-ollama']
-  
-  # Push Streamlit image
+    id: 'push-serving'
+    args: ['push', '--all-tags', 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving']
+    waitFor: ['build-serving']
+
   - name: 'gcr.io/cloud-builders/docker'
     id: 'push-streamlit'
-    args: 
-      - 'push'
-      - '--all-tags'
-      - 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app'
+    args: ['push', '--all-tags', 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app']
     waitFor: ['build-streamlit']
-  
-  # Deploy Ollama service
+
+  # ── Deploy Serving ────────────────────────────────────────
   - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'deploy-ollama'
-    args:
-      - 'run'
-      - 'deploy'
-      - 'ollama-service'
-      - '--image'
-      - 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/ollama-service:latest'
-      - '--port'
-      - '8080'
-      - '--concurrency'
-      - '4'
-      - '--cpu'
-      - '4'
-      - '--set-env-vars'
-      - 'OLLAMA_NUM_PARALLEL=4'
-      - '--max-instances'
-      - '1'
-      - '--memory'
-      - '8Gi'
-      - '--region'
-      - 'us-east1'
-      - '--allow-unauthenticated'
-      - '--no-cpu-throttling'
-      - '--timeout'
-      - '1800'
-    waitFor: ['push-ollama']
-  
-  # Deploy Streamlit service (after Ollama is deployed)
-  # Step 1: Get Ollama URL and store it
-  - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'get-ollama-url'
+    id: 'deploy-serving'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        OLLAMA_URL=$$(gcloud run services describe ollama-service --region=us-east1 --format="value(status.url)")
-        echo "OLLAMA_HOST=$$OLLAMA_URL" > /workspace/ollama-url.env
-        echo "Ollama URL: $$OLLAMA_URL"
-    waitFor: ['deploy-ollama']
+        gcloud run deploy serving \
+          --image us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving:$SHORT_SHA \
+          --port 8000 --memory 2Gi --cpu 1 \
+          --region us-east1 --allow-unauthenticated \
+          --set-env-vars "MLFLOW_TRACKING_URI=file:///app/mlruns,LOCAL=false"
+    waitFor: ['push-serving']
 
-  # Step 2: Deploy Streamlit with environment variables
+  # ── Get Serving internal URL ──────────────────────────────
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'get-serving-url'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        API_URL=$$(gcloud run services describe serving \
+          --region=us-east1 --format="value(status.url)")
+        echo "API_URL=$$API_URL" > /workspace/serving-url.env
+    waitFor: ['deploy-serving']
+
+  # ── Deploy Streamlit ──────────────────────────────────────
   - name: 'gcr.io/cloud-builders/gcloud'
     id: 'deploy-streamlit'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        source /workspace/ollama-url.env
+        source /workspace/serving-url.env
         QDRANT_HOST=$$(gcloud secrets versions access latest --secret=QDRANT_HOST)
         QDRANT_API_KEY=$$(gcloud secrets versions access latest --secret=QDRANT_API_KEY)
-        
+        MONGO_URI=$$(gcloud secrets versions access latest --secret=MONGO_URI)
+
         gcloud run deploy streamlit-app \
-          --image us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:latest \
-          --memory 2Gi \
-          --cpu 1 \
-          --port 8080 \
-          --timeout 300 \
-          --allow-unauthenticated \
-          --region us-east1 \
-          --set-env-vars "OLLAMA_HOST=$$OLLAMA_HOST,QDRANT_HOST=$$QDRANT_HOST,QDRANT_API_KEY=$$QDRANT_API_KEY"
-    waitFor: ['push-streamlit', 'get-ollama-url']
+          --image us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:$SHORT_SHA \
+          --port 8501 --memory 2Gi --cpu 1 \
+          --region us-east1 --allow-unauthenticated \
+          --set-env-vars "API_URL=$$API_URL,QDRANT_HOST=$$QDRANT_HOST,QDRANT_API_KEY=$$QDRANT_API_KEY,MONGO_URI=$$MONGO_URI,LOCAL=false"
+    waitFor: ['push-streamlit', 'get-serving-url']
 
-# Store images in Artifact Registry
 images:
-  - 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/ollama-service:latest'
+  - 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving:latest'
   - 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:latest'
-
-# Build options
-# options:
-#   machineType: 'E2_HIGHCPU_8'  # Faster builds
-#   logging: CLOUD_LOGGING_ONLY
