@@ -91,19 +91,19 @@ def scrape_properties(
 
             # ====== Phase 2: Embed all descriptions in one GPU batch ======
             if scraped_items:
-                # descriptions = [preprocess_text(item.pop('DESCRIPTION')) for item in scraped_items]
-                # ids = [create_uuid_from_string(item['WEB_PROPERTY_CODE']) for item in scraped_items]
-                # vectors = embed(descriptions)
+                descriptions = [preprocess_text(item.pop('DESCRIPTION')) for item in scraped_items]
+                ids = [create_uuid_from_string(item['WEB_PROPERTY_CODE']) for item in scraped_items]
+                vectors = embed(descriptions)
 
                 # ====== Phase 3: Build points and upsert in batches of 200 ======
-                # UPSERT_BATCH = 200
-                # points = [
-                #     PointStruct(id=uid, vector=vec, payload=item)
-                #     for uid, vec, item in zip(ids, vectors, scraped_items)
-                # ]
-                # for i in range(0, len(points), UPSERT_BATCH):
-                #     qdrant.upsert(collection_name=operation, points=points[i:i + UPSERT_BATCH])
-                mongodb[operation].insert_many(scraped_items)
+                UPSERT_BATCH = 200
+                points = [
+                    PointStruct(id=uid, vector=vec, payload=item)
+                    for uid, vec, item in zip(ids, vectors, scraped_items)
+                ]
+                for i in range(0, len(points), UPSERT_BATCH):
+                    qdrant.upsert(collection_name=operation, points=points[i:i + UPSERT_BATCH])
+                # mongodb[operation].insert_many(scraped_items)
 
                 total_points = len(scraped_items)
                 all_items.extend(scraped_items)

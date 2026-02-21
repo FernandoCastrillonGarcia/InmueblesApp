@@ -7,13 +7,13 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build-serving'
     args: ['build', '-f', 'Dockerfile.serving', '-t',
-           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving:$SHORT_SHA', '-t',
+           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving:$_SHORT_SHA', '-t',
            'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving:latest', '.']
 
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build-streamlit'
     args: ['build', '-f', 'Dockerfile.streamlit', '-t',
-           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:$SHORT_SHA', '-t',
+           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:$_SHORT_SHA', '-t',
            'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:latest', '.']
 
   # ── Push (parallel) ──────────────────────────────────────
@@ -35,7 +35,7 @@ steps:
       - '-c'
       - |
         gcloud run deploy serving \
-          --image us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving:$SHORT_SHA \
+          --image us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving:$_SHORT_SHA \
           --port 8000 --memory 2Gi --cpu 1 \
           --region us-east1 --allow-unauthenticated \
           --set-env-vars "MLFLOW_TRACKING_URI=file:///app/mlruns,LOCAL=false"
@@ -66,11 +66,14 @@ steps:
         MONGO_URI=$$(gcloud secrets versions access latest --secret=MONGO_URI)
 
         gcloud run deploy streamlit-app \
-          --image us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:$SHORT_SHA \
+          --image us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:$_SHORT_SHA \
           --port 8501 --memory 2Gi --cpu 1 \
           --region us-east1 --allow-unauthenticated \
           --set-env-vars "API_URL=$$API_URL,QDRANT_HOST=$$QDRANT_HOST,QDRANT_API_KEY=$$QDRANT_API_KEY,MONGO_URI=$$MONGO_URI,LOCAL=false"
     waitFor: ['push-streamlit', 'get-serving-url']
+
+substitutions:
+  _SHORT_SHA: 'latest'
 
 images:
   - 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving:latest'

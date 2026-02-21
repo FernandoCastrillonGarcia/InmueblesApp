@@ -3,6 +3,8 @@ import os
 from qdrant_client.models import PointStruct
 from utils import embed, preprocess_text
 from utils import create_uuid_from_string
+from dotenv import load_dotenv
+load_dotenv()
 
 OPERATION_INDEX = {
     'Venta': 1,
@@ -38,7 +40,6 @@ ANTIQUITY_INDEX = {
     'Más de 30 años': 5
 }
 INDEX_ANTIQUITY = {value:key for key, value in ANTIQUITY_INDEX.items()}
-
 
 LOCAL = os.getenv("LOCAL", "true").lower() == "true"
 

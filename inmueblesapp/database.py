@@ -23,7 +23,6 @@ class QdrantSingleton:
                 url = os.getenv("QDRANT_URL", "http://localhost:6333")
                 self._client = QdrantClient(url=url)
             else:
-                print(os.getenv('QDRANT_HOST'))
                 self._client = QdrantClient(
                     os.getenv('QDRANT_HOST'),
                     api_key=os.getenv('QDRANT_API_KEY')

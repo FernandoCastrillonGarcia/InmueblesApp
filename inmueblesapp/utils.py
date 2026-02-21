@@ -6,8 +6,6 @@ from database import QdrantSingleton
 from fastembed import TextEmbedding
 import re
 import os
-from database import QdrantSingleton
-import streamlit as st
 
 from qdrant_client.models import Filter
 
@@ -39,7 +37,6 @@ def _get_embedding_model() -> TextEmbedding:
         )
     return _embedding_model
 
-import streamlit as st
 def embed(text: list[str] | str) -> list[list[float]]:
     """Embed text using the singleton FastEmbed model.
 
@@ -55,7 +52,7 @@ def embed(text: list[str] | str) -> list[list[float]]:
         input_texts = [preprocess_text(text)]
     model = _get_embedding_model()
     
-    embeddings = list(model.embed(input_texts, batch_size = 16))
+    embeddings = list(model.embed(input_texts, batch_size = 8))
     
     return [e.tolist() for e in embeddings]
 

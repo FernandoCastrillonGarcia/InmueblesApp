@@ -15,7 +15,9 @@ app = typer.Typer(
 )
 
 @app.command()
-def scrape():
+def scrape(
+    no_cache: bool = typer.Option(False, "--no-cache", help="Disable ZenML caching for this run")
+):
     """
     Scrape property data from website.
     
@@ -27,18 +29,18 @@ def scrape():
     typer.secho("🔍 Starting scraping pipeline...", fg=typer.colors.CYAN, bold=True)
     
     try:
-        # Run pipeline - outputs stored as artifacts
-        scraping_pipeline()
+        scraping_pipeline.with_options(enable_cache=not no_cache)()
         
         typer.secho(f"✅ Scraping completed!", fg=typer.colors.GREEN, bold=True)
-        # typer.secho("📊 Check data/raw/ for CSV and ZenML dashboard for details", fg=typer.colors.BLUE)
         
     except Exception as e:
         typer.secho(f"❌ Scraping failed: {e}", fg=typer.colors.RED, bold=True, err=True)
         raise typer.Exit(code=1)
 
 @app.command()
-def clean():
+def clean(
+    no_cache: bool = typer.Option(False, "--no-cache", help="Disable ZenML caching for this run")
+):
     """
     Clean the database (remove duplicates, etc).
     """
@@ -47,7 +49,7 @@ def clean():
     typer.secho("🧹 Starting cleaning pipeline...", fg=typer.colors.CYAN, bold=True)
     
     try:
-        cleaning_pipeline()
+        cleaning_pipeline.with_options(enable_cache=not no_cache)()
         typer.secho(f"✅ Database cleaned successfully!", fg=typer.colors.GREEN, bold=True)
     except Exception as e:
         typer.secho(f"❌ Cleaning failed: {e}", fg=typer.colors.RED, bold=True, err=True)
@@ -67,6 +69,11 @@ def train(
         "--compare",
         "-c",
         help="Train all models for comparison"
+    ),
+    no_cache: bool = typer.Option(
+        False,
+        "--no-cache",
+        help="Disable ZenML caching for this run"
     )
 ):
     """
@@ -99,7 +106,7 @@ def train(
             typer.echo(f"{'='*60}")
             
             try:
-                price_prediction_pipeline(model_type=model_type.value)
+                price_prediction_pipeline.with_options(enable_cache=not no_cache)(model_type=model_type.value)
                 typer.secho(f"✅ {model_type.value.upper()} completed", fg=typer.colors.GREEN)
             except Exception as e:
                 typer.secho(f"❌ {model_type.value.upper()} failed: {e}", fg=typer.colors.RED, err=True)
@@ -111,7 +118,7 @@ def train(
         typer.secho(f"🚀 Training {model.value.upper()} model...", fg=typer.colors.CYAN, bold=True)
         
         try:
-            price_prediction_pipeline(model_type=model.value)
+            price_prediction_pipeline.with_options(enable_cache=not no_cache)(model_type=model.value)
             typer.secho(f"✅ {model.value.upper()} model trained successfully!", fg=typer.colors.GREEN, bold=True)
             typer.secho("📊 View results in ZenML dashboard", fg=typer.colors.BLUE)
         except Exception as e:
