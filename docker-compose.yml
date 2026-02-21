@@ -1,21 +1,43 @@
 services:
   qdrant:
-    image: qdrant/qdrant
+    image: qdrant/qdrant:v1.13.2
     ports:
       - "6333:6333"
     volumes:
       - qdrant_data:/qdrant/storage
 
   streamlit:
-    build: .
+    build: 
+      context: .
+      dockerfile: Dockerfile.streamlit
+    volumes:
+    - ./inmueblesapp:/app/inmueblesapp
     ports:
       - "8501:8501"
     depends_on:
       qdrant:
         condition: service_started
+      serving:
+        condition: service_started
+      mongo:
+        condition: service_started
+    environment:
+    - API_URL=http://serving:8000
+    - QDRANT_URL=http://qdrant:6333
+    - MONGO_LOCAL_URI=mongodb://mongo:27017
+    - PYTHONUNBUFFERED=1
     env_file:
       - .env
     restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=inmuebles_db
 
   serving:
     build:
@@ -33,4 +55,5 @@ services:
 
 volumes:
   qdrant_data:
+  mongo_data:
   

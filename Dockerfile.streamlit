@@ -1,4 +1,3 @@
-# Cloud-ready Dockerfile (single service)
 FROM python:3.13-slim
 
 # Install uv
@@ -6,25 +5,25 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 WORKDIR /app
 
+# Install build dependencies for python-rapidjson and others
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    gcc \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies
+# Install dependencies using uv
 RUN uv sync --frozen --no-dev
 
 # Copy application code
-COPY src/ ./src/
+COPY inmueblesapp/ ./inmueblesapp/
 # COPY data/ ./data/
 # COPY models/ ./models/
 
-# Cloud Run expects apps to listen on $PORT
-EXPOSE 8080
+EXPOSE 8501
 
-# Use cloud-based services (not local containers)
-# These will be set during deployment
-ENV OLLAMA_HOST=${OLLAMA_HOST}
-ENV QDRANT_HOST=${QDRANT_HOST}
-
-
-# Cloud Run command
-CMD ["uv", "run", "streamlit", "run", "src/app.py", "--server.port=8080", "--server.address=0.0.0.0"]
+# Use uv to run the application
+CMD ["uv", "run", "streamlit", "run", "inmueblesapp/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
