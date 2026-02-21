@@ -1,23 +1,26 @@
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
-# from qdrant_client.models import VectorParams, Distance
-from typing import Tuple, Annotated
+from qdrant_client.models import VectorParams, Distance, PointStruct
+
+from typing import Annotated, Any
 from datetime import datetime
 from zenml import step
+from zenml.client import Client
 from tqdm import tqdm
 from rich import print
 import pandas as pd
+import mlflow
 
 from pipelines.scrapping.src.finca_raiz import OPERATION_INDEX, PROPERTY_INDEX, LOCAL
 import pipelines.scrapping.src.finca_raiz as fr
-from database import MongoSingleton
-# Log to MLflow
-import mlflow
+from database import MongoSingleton, QdrantSingleton
+from utils import embed, preprocess_text, create_uuid_from_string
+# Source - https://stackoverflow.com/a/62703850
+# Posted by Alec Segal, modified by community. See post 'Timeline' for change history
+# Retrieved 2026-02-08, License - CC BY-SA 4.0
 
-from zenml import step
-from zenml.client import Client
-import pandas as pd
-from typing import Annotated, Tuple
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 @step(experiment_tracker="mlflow_tracker")
 def scrape_properties(
@@ -25,9 +28,9 @@ def scrape_properties(
     properties:list[str]
 )-> Annotated[pd.DataFrame, 'stats']:
 
-    mongo_client = MongoSingleton.get_client()
-    db = mongo_client["inmuebles_db"]
-    collection = db["properties"]
+    mongo_client = MongoSingleton.get_client(local = LOCAL)
+    mongodb = mongo_client["inmuebles_db"]
+    qdrant = QdrantSingleton.get_client(local = LOCAL)
 
     all_stats = []
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -38,14 +41,14 @@ def scrape_properties(
         all_items = []
 
         # create collection if it doesn't exist
-        # try:
-        #     qdrant.create_collection(operation,
-        #         vectors_config=VectorParams(
-        #             size=768,
-        #             distance=Distance.COSINE
-        #         ))
-        # except Exception as e:
-        #     pass
+        try:
+            qdrant.create_collection(operation,
+                vectors_config=VectorParams(
+                    size=768,
+                    distance=Distance.COSINE
+                ))
+        except Exception as e:
+            pass
         
         for property in properties:
 
@@ -57,17 +60,18 @@ def scrape_properties(
 
             # get the total pages that are going to be scrapped
             total_hits = fr.get_total_hits(property_index, operation_index, location=location)
-            pages = fr.get_total_pages(total_hits, rows)            
+            pages = fr.get_total_pages(total_hits, rows)    
             print(f"Operation: {operation}, Property: {property}")
             print(f"Total properties: {total_hits}, Total pages: {pages}")
 
             # Stats in the scrapping process
             total_points = 0
             success_count = 0
-            failure_count = 0      
+            failure_count = 0
 
-            # Requests en Multiprocessing
-            with ProcessPoolExecutor(max_workers=10) as executor:
+            # ====== Phase 1: Scrape all pages in parallel ======
+            scraped_items: list[dict] = []
+            with ProcessPoolExecutor(max_workers=8) as executor:
                 futures = [
                     executor.submit(fr.get_hits, rows, page, property_index, operation_index, None, location) 
                     for page in range(1, pages + 1)
@@ -75,68 +79,74 @@ def scrape_properties(
                 for future in tqdm(as_completed(futures), total=pages, desc="Fetching data"):
                     try:
                         items = future.result()
-
                         if items:
-                            # Add timestamp to items
                             for item in items:
                                 item['scraped_at'] = scrape_time
                                 item['batch_id'] = timestamp
-                            
-                            # Insert into MongoDB
-                            collection.insert_many(items)
-
-                        total_points += len(items)
+                            scraped_items.extend(items)
                         success_count += 1
-
-                        all_items += items
                     except Exception as e:
                         failure_count += 1
                         print(f"Error fetching page data: {e}")
+
+            # ====== Phase 2: Embed all descriptions in one GPU batch ======
+            if scraped_items:
+                # descriptions = [preprocess_text(item.pop('DESCRIPTION')) for item in scraped_items]
+                # ids = [create_uuid_from_string(item['WEB_PROPERTY_CODE']) for item in scraped_items]
+                # vectors = embed(descriptions)
+
+                # ====== Phase 3: Build points and upsert in batches of 200 ======
+                # UPSERT_BATCH = 200
+                # points = [
+                #     PointStruct(id=uid, vector=vec, payload=item)
+                #     for uid, vec, item in zip(ids, vectors, scraped_items)
+                # ]
+                # for i in range(0, len(points), UPSERT_BATCH):
+                #     qdrant.upsert(collection_name=operation, points=points[i:i + UPSERT_BATCH])
+                mongodb[operation].insert_many(scraped_items)
+
+                total_points = len(scraped_items)
+                all_items.extend(scraped_items)
+
             print()
 
-            df = pd.DataFrame(all_items)
+            if len(all_items) > 0:
+                df = pd.DataFrame(all_items)
 
-            df['LATITUDE'] = pd.to_numeric(df['LATITUDE'], errors='coerce')
-            df['LONGITUDE'] = pd.to_numeric(df['LONGITUDE'], errors='coerce')
-            df['PRICE'] = pd.to_numeric(df['PRICE'], errors='coerce')
-            df['AREA'] = pd.to_numeric(df['AREA'], errors='coerce')
+                df['LATITUDE'] = pd.to_numeric(df['LATITUDE'], errors='coerce')
+                df['LONGITUDE'] = pd.to_numeric(df['LONGITUDE'], errors='coerce')
+                df['PRICE'] = pd.to_numeric(df['PRICE'], errors='coerce')
+                df['AREA'] = pd.to_numeric(df['AREA'], errors='coerce')
 
-            # Return statistics
-            signature = {
-                # Index of the signature
-                "timestamp": timestamp,
-                "property": property,
-                "operation": operation,
+                # Return statistics
+                if success_count + failure_count == 0:
+                    success_rate = None
+                else:
+                    success_rate = success_count / (success_count + failure_count) * 100
+            
+                signature = {
+                    # Index of the signature
+                    "timestamp": timestamp,
+                    "property": property,
+                    "operation": operation,
 
-                # scrapping process
-                "pages_success": success_count,
-                "pages_failed": failure_count,
-                "success_rate": success_count / (success_count + failure_count) * 100,
+                    # scrapping process
+                    "pages_success": success_count,
+                    "pages_failed": failure_count,
+                    "success_rate": success_rate,
 
-                # numeric statistics
-                'total_properties':len(df.loc[df['PROPERTY_TYPE'] == property]),
-                'mean_price': df.loc[df['PROPERTY_TYPE'] == property, 'PRICE'].mean(),
-            }
+                    # numeric statistics
+                    'total_properties':len(df.loc[df['PROPERTY_TYPE'] == property]),
+                    'mean_price': df.loc[df['PROPERTY_TYPE'] == property, 'PRICE'].mean(),
+                }
 
-            all_stats.append(signature)
+                all_stats.append(signature)
 
     # Logging stats
     stats = pd.DataFrame(all_stats)
 
-    # TODO: DEPRECATED csv storage
-    # # Storing Data
-    # df = pd.DataFrame(all_items)
 
-    # df['LATITUDE'] = pd.to_numeric(df['LATITUDE'], errors='coerce')
-    # df['LONGITUDE'] = pd.to_numeric(df['LONGITUDE'], errors='coerce')
-    # df['PRICE'] = pd.to_numeric(df['PRICE'], errors='coerce')
-    # df['AREA'] = pd.to_numeric(df['AREA'], errors='coerce')
-    
-    # # Save with timestamp (Deprecated in favor of MongoDB)
-    # df.to_csv(f"data/raw/properties_{timestamp}.csv", index=False)
-
-
-    print(f"✅ Stored {len(all_items)} properties in MongoDB")
+    print(f"✅ Stored {len(all_items)} properties")
 
     return stats
 
@@ -164,16 +174,16 @@ def validate_scrapping_signature(
 
     while tries < 5:
         try:
-            previous_run = runs[tries]  
+            previous_run = runs[tries]  # TODO: Manejar el caso donde no hay corrida previa
             previous_step = previous_run.steps["scrape_properties"]
             
             previous_stats = previous_step.outputs["stats"][0].load()
             break
-        except KeyError:
+        except:
             tries += 1
     
     if tries == 5:
-        raise Exception('Despue de 5 intentos hubo un fallo. Hay que revisar')
+        raise Exception('Despues de 5 intentos hubo un fallo. Hay que revisar')
 
 
     comparison = current_stats.merge(

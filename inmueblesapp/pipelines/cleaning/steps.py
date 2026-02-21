@@ -1,7 +1,9 @@
 from zenml import step
-from database import MongoSingleton
+from database import MongoSingleton, QdrantSingleton
 from typing import Any, Dict
 from tqdm import tqdm
+import numpy as np
+from qdrant_client.models import PointStruct
 
 @step
 def remove_duplicates_by_source() -> Dict[str, int]:
@@ -62,8 +64,8 @@ def remove_duplicates_by_source() -> Dict[str, int]:
         
         # Find all docs for this group, sorted by scraped_at descending (newest first)
         cursor = collection.find(
-            {"SOURCE": source, "WEB_PROPERTY_CODE": code}
-            #{"WEB_PROPERTY_CODE": code}
+            {"SOURCE": source, "WEB_PROPERTY_CODE": code},
+            {"WEB_PROPERTY_CODE": code}
         ).sort("scraped_at", -1)
         
         docs = list(cursor)
@@ -80,4 +82,114 @@ def remove_duplicates_by_source() -> Dict[str, int]:
     print(f"✅ Deduplication complete. Removed {deleted_count} duplicate properties across {groups_processed} groups.")
     
     return {"deleted_count": deleted_count, "groups_processed": groups_processed}
+
+
+@step
+def cap_prices_by_property_type(
+    collections: list[str],
+    local: bool = True
+) -> Dict[str, Any]:
+    """Cap prices per PROPERTY_TYPE: negatives → 0, values above p99 → p99.
+
+    Applies to both MongoDB and Qdrant (same collection names).
+
+    Args:
+        collections: Collection names to process (e.g. ["Arriendo", "Venta"]).
+        local: Whether to use local DB instances.
+
+    Returns:
+        Dict with per-collection, per-type stats of updates made.
+    """
+    mongo_client = MongoSingleton.get_client(local=local)
+    db = mongo_client["inmuebles_db"]
+    qdrant = QdrantSingleton.get_client(local=local)
+
+    stats: Dict[str, Any] = {}
+
+    for col_name in collections:
+        collection = db[col_name]
+        property_types = collection.distinct("PROPERTY_TYPE")
+        col_stats: Dict[str, Dict[str, int]] = {}
+
+        for ptype in property_types:
+            # --- Compute p99 for this PROPERTY_TYPE ---
+            prices = [
+                doc["PRICE"]
+                for doc in collection.find(
+                    {"PROPERTY_TYPE": ptype, "PRICE": {"$exists": True}},
+                    {"PRICE": 1}
+                )
+                if isinstance(doc.get("PRICE"), (int, float))
+            ]
+
+            if not prices:
+                continue
+
+            p99 = float(np.percentile(prices, 99))
+            negatives_fixed = 0
+            capped = 0
+
+            # --- Fix negatives in Mongo ---
+            neg_result = collection.update_many(
+                {"PROPERTY_TYPE": ptype, "PRICE": {"$lt": 0}},
+                {"$set": {"PRICE": 0}}
+            )
+            negatives_fixed += neg_result.modified_count
+
+            # --- Cap above p99 in Mongo ---
+            cap_result = collection.update_many(
+                {"PROPERTY_TYPE": ptype, "PRICE": {"$gt": p99}},
+                {"$set": {"PRICE": p99}}
+            )
+            capped += cap_result.modified_count
+
+            # --- Fix in Qdrant (scroll + set_payload) ---
+            offset = None
+            while True:
+                points, offset = qdrant.scroll(
+                    collection_name=col_name,
+                    scroll_filter={
+                        "must": [
+                            {"key": "PROPERTY_TYPE", "match": {"value": ptype}}
+                        ]
+                    },
+                    with_payload=["PRICE", "PROPERTY_TYPE"],
+                    limit=100,
+                    offset=offset,
+                )
+
+                for point in points:
+                    price = point.payload.get("PRICE")
+                    if not isinstance(price, (int, float)):
+                        continue
+
+                    new_price = None
+                    if price < 0:
+                        new_price = 0
+                        negatives_fixed += 1
+                    elif price > p99:
+                        new_price = p99
+                        capped += 1
+
+                    if new_price is not None:
+                        qdrant.set_payload(
+                            collection_name=col_name,
+                            payload={"PRICE": new_price},
+                            points=[point.id],
+                        )
+
+                if offset is None:
+                    break
+
+            col_stats[ptype] = {
+                "p99": round(p99),
+                "negatives_fixed": negatives_fixed,
+                "capped_above_p99": capped,
+            }
+            print(f"  {col_name}/{ptype}: p99={p99:,.0f} | neg→0: {negatives_fixed} | capped: {capped}")
+
+        stats[col_name] = col_stats
+
+    print("✅ Price capping complete.")
+    return stats
 

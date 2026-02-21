@@ -1,6 +1,7 @@
 import requests
+import os
 from qdrant_client.models import PointStruct
-# from embedding import embed, preprocess_text
+from utils import embed, preprocess_text
 from utils import create_uuid_from_string
 
 OPERATION_INDEX = {
@@ -12,7 +13,20 @@ INDEX_OPERATION = {value:key for key, value in OPERATION_INDEX.items()}
 PROPERTY_INDEX = {
     'Casa': 1,
     'Apartamento': 2,
-    'Apartaestudio': 4
+    'Lote': 3,
+    'Local': 4,
+    'Oficina': 5,
+    'Finca': 6,
+    'Parqueadero': 8,
+    'Consultorio': 9,
+    'Edificio': 10,
+    'Apartaestudio': 14,
+    'Cabaña': 15,
+    'Casa Campestre': 16,
+    'Casa Lote': 17,
+    'Habitación': 18,
+    'Bodega': 19
+
 }
 INDEX_PROPERTY = {value:key for key, value in PROPERTY_INDEX.items()}
 
@@ -25,7 +39,8 @@ ANTIQUITY_INDEX = {
 }
 INDEX_ANTIQUITY = {value:key for key, value in ANTIQUITY_INDEX.items()}
 
-LOCAL = True
+
+LOCAL = os.getenv("LOCAL", "true").lower() == "true"
 
 def get_location(query:str)->dict:
     url = "https://search-service.fincaraiz.com.co/api/v1/locations/infofinca-autocomplete"
@@ -98,13 +113,32 @@ def get_total_hits(property_type_id, operation_type_id, projects=None, location=
     
     return response.get('hits',{'message':'No hay hits'}).get('total',{'message':'No hay total'}).get('value', -1)
 
-def hits_to_points(items)->list[PointStruct]:
+def get_total_pages(total_hits:int, rows:int) -> int:
+        pages = total_hits // rows
+        if total_hits % rows > 0:
+            pages += 1
+        return pages
 
+def hits_to_points(
+    items: list[dict],
+    vectors: list[list[float]] | None = None) -> list[PointStruct]:
+    """Convert scraped items to Qdrant PointStructs.
+
+    Args:
+        items: List of property dicts (DESCRIPTION is popped as side-effect).
+        vectors: Pre-computed embeddings. If None, computes them on the fly.
+
+    Returns:
+        List of PointStruct ready for Qdrant upsert.
+    """
     descriptions = [preprocess_text(item.pop('DESCRIPTION')) for item in items]
     ids = [create_uuid_from_string(item['WEB_PROPERTY_CODE']) for item in items]
-    vectors = embed(descriptions)
 
-    return [PointStruct(id=id, vector=vector, payload=item) for id, vector, item in zip(ids, vectors, items)]
+    if vectors is None:
+        vectors = embed(descriptions)
+
+    return [PointStruct(id=id, vector=vector, payload=item)
+            for id, vector, item in zip(ids, vectors, items)]
     
 def get_hits(rows, pages, property_type_id, operation_type_id, projects=None, location=None)->list[dict]:
 
@@ -183,8 +217,3 @@ def get_hits(rows, pages, property_type_id, operation_type_id, projects=None, lo
 
     return items
    
-def get_total_pages(total_hits, rows) -> int:
-        pages = total_hits // rows
-        if total_hits % rows > 0:
-            pages += 1
-        return pages

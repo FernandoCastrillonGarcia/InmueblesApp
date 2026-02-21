@@ -5,9 +5,24 @@ import pipelines.scrapping.steps as steps
 def scraping_pipeline():
     """Pipeline to scrape property data"""
     
-    operations = ['Arriendo']
-    property_types = ['Casa', 'Apartamento']
-    
+    operations = ['Arriendo', 'Venta']
+    property_types = [
+        'Casa',
+        'Apartamento',
+        'Lote',
+        'Local',
+        'Oficina',
+        'Finca',
+        'Parqueadero',
+        'Consultorio',
+        'Edificio',
+        'Apartaestudio',
+        'Cabaña',
+        'Casa Campestre',
+        'Casa Lote',
+        'Habitación',
+        'Bodega'
+    ]
     # Step 1 Scrape Finca Raiz properties
     stats = steps.scrape_properties(operations, property_types)
 
