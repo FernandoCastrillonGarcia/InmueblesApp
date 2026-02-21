@@ -1,11 +1,12 @@
-import os
-import mlflow
-import pandas as pd
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-app = FastAPI(title="Inmuebles Price Prediction API")
+import pandas as pd
+import mlflow
+import os
+
 
 # Define Input Schema based on config.json
 class PropertyInput(BaseModel):
@@ -26,12 +27,15 @@ class PropertyInput(BaseModel):
     ANTIQUITY: str
     PROPERTY_TYPE: str
 
-# Global model variable
-model = None
 
-@app.on_event("startup")
-def load_model():
-    global model
+
+# Global model variable
+MODEL = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup logic
+    global MODEL
     try:
         tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "file:///mlruns")
         
@@ -60,7 +64,7 @@ def load_model():
         # Let's try standard load first.
         try:
             # 1. Try loading from Registry (if available)
-            model = mlflow.sklearn.load_model(f"models:/{model_name}/latest")
+            MODEL = mlflow.sklearn.load_model(f"models:/{model_name}/latest")
             print("✅ Model loaded via Registry")
         except Exception as reg_error:
             print(f"⚠️ Registry load failed: {reg_error}")
@@ -91,7 +95,7 @@ def load_model():
                 print(f"⚠️ Experiment search failed: {exp_error}")
 
         # 3. Final Fallback: Manual filesystem scan (if SQLite db is missing/locked)
-        if model is None:
+        if MODEL is None:
              print("🔍 Scanning local mlruns for artifacts...")
              # This is a bit hacky but works when DB is completely broken in container
              # We assume standard structure: mlruns/<exp_id>/<run_id>/artifacts/model
@@ -110,19 +114,25 @@ def load_model():
                  
                  if latest_model_path:
                      print(f"📂 Found artifact on disk: {latest_model_path}")
-                     model = mlflow.sklearn.load_model(latest_model_path)
+                     MODEL = mlflow.sklearn.load_model(latest_model_path)
 
-        if model:
+        if MODEL:
             print("✅ Model loaded successfully")
         else:
             print("❌ Model could not be loaded. Please ensure 'mlruns' is mounted and contains a trained model.")
 
     except Exception as e:
         print(f"⚠️ Error loading model: {e}")
+    
+    yield
+    # Shutdown logic (if any)
+    print("🛑 Shutting down serving API")
+
+app = FastAPI(title="Inmuebles Price Prediction API", lifespan=lifespan)
 
 @app.post("/predict")
 def predict_price(property: PropertyInput):
-    if not model:
+    if not MODEL:
         raise HTTPException(status_code=503, detail="Model not loaded")
     
     # Convert to DataFrame
@@ -132,7 +142,7 @@ def predict_price(property: PropertyInput):
     try:
         # Prediction
         # The pipeline handles preprocessing and target inverse transform (via TTR)
-        prediction = model.predict(data)
+        prediction = MODEL.predict(data)
         
         # Ensure scalar
         price = prediction[0] if hasattr(prediction, '__iter__') else prediction
@@ -143,6 +153,6 @@ def predict_price(property: PropertyInput):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model_loaded": model is not None}
+    return {"status": "ok", "model_loaded": MODEL is not None}
 
 

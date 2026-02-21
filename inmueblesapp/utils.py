@@ -3,7 +3,6 @@ import matplotlib.colors as mcolors
 import numpy as np
 import uuid
 from database import QdrantSingleton
-
 from fastembed import TextEmbedding
 import re
 import os
@@ -11,6 +10,8 @@ from database import QdrantSingleton
 import streamlit as st
 
 from qdrant_client.models import Filter
+
+
 def preprocess_text(text):
     # Remove \n and replace with spaces
     text = text.replace('\n', ' ')
@@ -21,35 +22,54 @@ def preprocess_text(text):
     # Strip leading/trailing whitespace
     return text.strip()
 
-def embed(text:list[str] | str)->list[list[float]]:
+# Module-level singleton: loaded once, reused across all embed() calls
+_embedding_model: TextEmbedding | None = None
 
-    if isinstance(text,list):
-        input = [preprocess_text(t) for t in text]
+def _get_embedding_model() -> TextEmbedding:
+    """Lazy-load the embedding model once per process."""
+    global _embedding_model
+    if _embedding_model is None:
+        import onnxruntime as ort
+        available = ort.get_available_providers()
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if "CUDAExecutionProvider" in available else ["CPUExecutionProvider"]
+        _embedding_model = TextEmbedding(
+            model_name="nomic-ai/nomic-embed-text-v1.5",
+            providers=providers,
+            show_progress=False
+        )
+    return _embedding_model
+
+import streamlit as st
+def embed(text: list[str] | str) -> list[list[float]]:
+    """Embed text using the singleton FastEmbed model.
+
+    Args:
+        text: Single string or list of strings to embed.
+
+    Returns:
+        List of embedding vectors as lists of floats.
+    """
+    if isinstance(text, list):
+        input_texts = [preprocess_text(t) for t in text]
     else:
-        input = [preprocess_text(text)]
-
-    # Use FastEmbed directly
-    embedding_model = TextEmbedding(model_name="nomic-ai/nomic-embed-text-v1.5")
+        input_texts = [preprocess_text(text)]
+    model = _get_embedding_model()
     
-    # FastEmbed returns a generator, convert to list
-    embeddings = list(embedding_model.embed(input))
+    embeddings = list(model.embed(input_texts, batch_size = 16))
     
-    # FastEmbed returns numpy arrays, convert to list of floats
     return [e.tolist() for e in embeddings]
 
 
-def query(text:str, payload:[dict] = None, limit = 10, local=True)->list:
-
+def query(text: str, collection_name: str = "Arriendo", payload: dict = None, limit=10, local=True) -> list:
     client = QdrantSingleton(local=local).get_client()
-    
     vector = embed(text)[0]
-    
+
     search_result = client.query_points(
-        collection_name="Arriendo",
+        collection_name=collection_name,
         query=vector,
-        query_filter = Filter(**payload),
+        query_filter=Filter(**payload) if payload else None,
         with_payload=True,
-        limit=limit
+        limit=limit,
     ).points
 
     return search_result
@@ -139,3 +159,6 @@ def points_that_dont_work(collection_name: str, local: bool = False, limit: int 
     except Exception as e:
         print(f"Error scrolling collection {collection_name}: {e}")
         return
+
+if __name__=='__main__':
+    pass
