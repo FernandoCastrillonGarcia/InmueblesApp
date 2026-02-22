@@ -78,3 +78,6 @@ substitutions:
 images:
   - 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving:latest'
   - 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:latest'
+
+options:
+  defaultLogsBucketBehavior: REGIONAL_USER_OWNED_BUCKET
