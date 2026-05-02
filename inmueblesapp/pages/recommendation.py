@@ -60,6 +60,7 @@ max_results = c3.number_input("Máximo resultados", 5, 50, 10)
 def get_field_bounds(collection_name: str, property_type: str, field: str) -> tuple[int, int]:
     """Get min/max of a numeric field from MongoDB, filtered by PROPERTY_TYPE."""
     query_filter = {"PROPERTY_TYPE": property_type, field: {"$exists": True, "$type": "number"}}
+    st.write(query_filter)
     min_doc = mongo_db[collection_name].find_one(query_filter, {field: 1}, sort=[(field, ASCENDING)])
     max_doc = mongo_db[collection_name].find_one(query_filter, {field: 1}, sort=[(field, DESCENDING)])
     if min_doc and max_doc:
@@ -70,17 +71,14 @@ with st.expander('Filtros adicionales'):
 
     # Filtros generales
     keys = ["BUILT_AREA", "GARAGE", "BATHROOMS", "ROOMS"]
-    labels = ["Área construida en m²", "Número de habitaciones", "Número de Baños", "Número de Parqueaderos"]
+    labels = ["Área construida en m²", "Parqueaderos", "Número de Baños", "Número de Habitaciones"]
     schemas = [PayloadSchemaType.FLOAT] + ([PayloadSchemaType.INTEGER] * 3)
     steps = [10, 1, 1, 1]
 
     ranges = []
     for key, label, step_val in zip(keys, labels, steps):
         lo, hi = get_field_bounds(operation, property_type, key)
-        # Default selection: 25% and 75% of the range
-        default_lo = lo + (hi - lo) // 4
-        default_hi = lo + 3 * (hi - lo) // 4
-        ranges.append(st.slider(label, lo, max(hi, lo + 1), (default_lo, default_hi), step=step_val))
+        ranges.append(st.slider(label, lo, max(hi, lo + 1), (lo, max(hi, lo + 1)), step=step_val))
 
     must_condition = []
     for range_tuple, key, schema in zip(ranges, keys, schemas):
@@ -112,8 +110,8 @@ search_button = st.button("🔍 Buscar Propiedades", type="primary", use_contain
 # Results summary (placeholder)
 if search_button and ss.search_text:
     
-    ss.points = query(ss.search_text, collection_name=operation, payload=ss.query_payload, limit=max_results, local=LOCAL)
-
+    ss.points = query(ss.search_text, collection_name=operation, limit=max_results, local=LOCAL, payload=ss.query_payload)
+    
 st.markdown("### Mapa de Resultados")    
 # Create folium map (Bogotá center)
 m = folium.Map(

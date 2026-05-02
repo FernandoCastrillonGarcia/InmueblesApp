@@ -1,9 +1,12 @@
 from zenml import step
 from database import MongoSingleton, QdrantSingleton
-from typing import Any, Dict
+from typing import Any, Dict, List
 from tqdm import tqdm
 import numpy as np
 from qdrant_client.models import PointStruct
+import os
+
+LOCAL = os.getenv("LOCAL", "true").lower() == "true"
 
 @step
 def remove_duplicates_by_source() -> Dict[str, int]:
@@ -191,5 +194,170 @@ def cap_prices_by_property_type(
         stats[col_name] = col_stats
 
     print("✅ Price capping complete.")
+    return stats
+
+
+@step
+def remove_erroneous_values(
+    collections: List[str],
+    local: bool = True
+) -> Dict[str, Any]:
+    """Remove known erroneous sentinel values from both MongoDB and Qdrant.
+
+    Heuristics from the training pipeline:
+      - FLOOR == 202 is a data entry error
+      - STRATUM == 101 is a data entry error
+
+    For Apartamento/Apartaestudio specifically:
+      - AREA must be in (0, 400]
+      - PRICE must be in [100_000, 20_000_000]
+
+    Matching documents are deleted from both databases.
+    """
+    from utils import create_uuid_from_string
+
+    mongo_client = MongoSingleton.get_client(local=local)
+    db = mongo_client["inmuebles_db"]
+    qdrant = QdrantSingleton.get_client(local=local)
+
+    stats: Dict[str, Any] = {}
+
+    for col_name in collections:
+        collection = db[col_name]
+        deleted_count = 0
+
+        bad_filters = [
+            {"FLOOR": 202},
+            {"STRATUM": 101},
+            {"PROPERTY_TYPE": {"$in": ["Apartamento", "Apartaestudio"]}, "AREA": {"$lte": 0}},
+            {"PROPERTY_TYPE": {"$in": ["Apartamento", "Apartaestudio"]}, "AREA": {"$gt": 400}},
+            {"PROPERTY_TYPE": {"$in": ["Apartamento", "Apartaestudio"]}, "PRICE": {"$lt": 100_000}},
+            {"PROPERTY_TYPE": {"$in": ["Apartamento", "Apartaestudio"]}, "PRICE": {"$gt": 20_000_000}},
+        ]
+
+        for bad_filter in bad_filters:
+            bad_docs = list(collection.find(bad_filter, {"WEB_PROPERTY_CODE": 1}))
+            if not bad_docs:
+                continue
+
+            codes = [doc["WEB_PROPERTY_CODE"] for doc in bad_docs if "WEB_PROPERTY_CODE" in doc]
+            result = collection.delete_many(bad_filter)
+            deleted_count += result.deleted_count
+
+            for code in codes:
+                try:
+                    point_id = create_uuid_from_string(code)
+                    qdrant.delete(collection_name=col_name, points_selector=[point_id])
+                except Exception:
+                    pass
+
+        stats[col_name] = {"deleted": deleted_count}
+        print(f"  {col_name}: removed {deleted_count} erroneous documents")
+
+    print("✅ Erroneous value removal complete.")
+    return stats
+
+
+@step
+def cap_numeric_fields(
+    collections: List[str],
+    local: bool = True
+) -> Dict[str, Any]:
+    """Cap numeric fields per PROPERTY_TYPE using the 99th percentile.
+
+    Fields capped: BUILT_AREA, AREA, GARAGE, BATHROOMS, ROOMS.
+    Negatives are set to 0, values above p99 are set to p99.
+    Applied to both MongoDB and Qdrant.
+    """
+    FIELDS_TO_CAP = ["BUILT_AREA", "AREA", "GARAGE", "BATHROOMS", "ROOMS"]
+
+    mongo_client = MongoSingleton.get_client(local=local)
+    db = mongo_client["inmuebles_db"]
+    qdrant = QdrantSingleton.get_client(local=local)
+
+    stats: Dict[str, Any] = {}
+
+    for col_name in collections:
+        collection = db[col_name]
+        property_types = collection.distinct("PROPERTY_TYPE")
+        col_stats: Dict[str, Dict] = {}
+
+        for ptype in property_types:
+            ptype_stats: Dict[str, Dict] = {}
+
+            for field in FIELDS_TO_CAP:
+                values = [
+                    doc[field]
+                    for doc in collection.find(
+                        {"PROPERTY_TYPE": ptype, field: {"$exists": True, "$type": "number"}},
+                        {field: 1}
+                    )
+                    if isinstance(doc.get(field), (int, float))
+                ]
+
+                if not values:
+                    continue
+
+                p99 = float(np.percentile(values, 99))
+                negatives_fixed = 0
+                capped = 0
+
+                neg_result = collection.update_many(
+                    {"PROPERTY_TYPE": ptype, field: {"$lt": 0}},
+                    {"$set": {field: 0}}
+                )
+                negatives_fixed += neg_result.modified_count
+
+                cap_result = collection.update_many(
+                    {"PROPERTY_TYPE": ptype, field: {"$gt": p99}},
+                    {"$set": {field: p99}}
+                )
+                capped += cap_result.modified_count
+
+                offset = None
+                while True:
+                    points, offset = qdrant.scroll(
+                        collection_name=col_name,
+                        scroll_filter={
+                            "must": [
+                                {"key": "PROPERTY_TYPE", "match": {"value": ptype}}
+                            ]
+                        },
+                        with_payload=[field, "PROPERTY_TYPE"],
+                        limit=100,
+                        offset=offset,
+                    )
+
+                    for point in points:
+                        val = point.payload.get(field)
+                        if not isinstance(val, (int, float)):
+                            continue
+
+                        new_val = None
+                        if val < 0:
+                            new_val = 0
+                        elif val > p99:
+                            new_val = p99
+
+                        if new_val is not None:
+                            qdrant.set_payload(
+                                collection_name=col_name,
+                                payload={field: new_val},
+                                points=[point.id],
+                            )
+
+                    if offset is None:
+                        break
+
+                ptype_stats[field] = {"p99": round(p99, 2), "neg_fixed": negatives_fixed, "capped": capped}
+
+            if ptype_stats:
+                col_stats[ptype] = ptype_stats
+                for field, s in ptype_stats.items():
+                    print(f"  {col_name}/{ptype}/{field}: p99={s['p99']:,.1f} | neg→0: {s['neg_fixed']} | capped: {s['capped']}")
+
+        stats[col_name] = col_stats
+
+    print("✅ Numeric field capping complete.")
     return stats
 

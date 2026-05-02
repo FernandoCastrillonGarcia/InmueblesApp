@@ -158,4 +158,4 @@ def points_that_dont_work(collection_name: str, local: bool = False, limit: int 
         return
 
 if __name__=='__main__':
-    pass
+    print(query('momazones'))
