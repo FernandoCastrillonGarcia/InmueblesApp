@@ -1,59 +1,36 @@
 services:
-  qdrant:
-    image: qdrant/qdrant:v1.13.2
-    ports:
-      - "6333:6333"
-    volumes:
-      - qdrant_data:/qdrant/storage
-
-  streamlit:
-    build: 
+  frontend:
+    build:
       context: .
-      dockerfile: Dockerfile.streamlit
-    volumes:
-    - ./inmueblesapp:/app/inmueblesapp
+      dockerfile: Dockerfile.frontend
     ports:
-      - "8501:8501"
+      - "80:80"
     depends_on:
-      qdrant:
-        condition: service_started
-      serving:
-        condition: service_started
-      mongo:
-        condition: service_started
+      - backend
+    restart: always
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
     environment:
-    - API_URL=http://serving:8000
-    - QDRANT_URL=http://qdrant:6333
-    - MONGO_LOCAL_URI=mongodb://mongo:27017
-    - PYTHONUNBUFFERED=1
-    env_file:
-      - .env
-    restart: unless-stopped
+      - MONGO_LOCAL_URI=${MONGO_LOCAL_URI:-mongodb://mongo:27017}
+      - MLFLOW_TRACKING_URI=file:///app/mlruns
+    volumes:
+      - ./mlruns:/app/mlruns # Mount models
+    depends_on:
+      - mongo
+    restart: always
 
   mongo:
-    image: mongo:7
+    image: mongo:6.0
     ports:
       - "27017:27017"
     volumes:
-      - mongo_data:/data/db
-    environment:
-      - MONGO_INITDB_DATABASE=inmuebles_db
-
-  serving:
-    build:
-      context: .
-      dockerfile: Dockerfile.serving
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./mlruns:/app/mlruns
-    environment:
-      - MLFLOW_TRACKING_URI=file:///app/mlruns
-    env_file:
-      - .env
-    restart: unless-stopped
+      - mongodb_data:/data/db
+    restart: always
 
 volumes:
-  qdrant_data:
-  mongo_data:
-  
+  mongodb_data:

@@ -1,83 +1,81 @@
 # ============================================================
-#  Cloud Build — build + deploy Serving & Streamlit to Cloud Run
+#  Cloud Build — build + deploy Backend & Frontend to Cloud Run
 #  Triggered manually or by CI/CD on push to main.
 # ============================================================
 steps:
   # ── Build (parallel) ──────────────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'
-    id: 'build-serving'
-    args: ['build', '-f', 'Dockerfile.serving', '-t',
-           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving:$_SHORT_SHA', '-t',
-           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving:latest', '.']
+    id: 'build-backend'
+    args: ['build', '-f', 'Dockerfile.backend', '-t',
+           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/backend:$_SHORT_SHA', '-t',
+           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/backend:latest', '.']
 
   - name: 'gcr.io/cloud-builders/docker'
-    id: 'build-streamlit'
-    args: ['build', '-f', 'Dockerfile.streamlit', '-t',
-           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:$_SHORT_SHA', '-t',
-           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:latest', '.']
+    id: 'build-frontend'
+    args: ['build', '-f', 'Dockerfile.frontend', '-t',
+           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/frontend-app:$_SHORT_SHA', '-t',
+           'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/frontend-app:latest', '.']
 
   # ── Push (parallel) ──────────────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'
-    id: 'push-serving'
-    args: ['push', '--all-tags', 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving']
-    waitFor: ['build-serving']
+    id: 'push-backend'
+    args: ['push', '--all-tags', 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/backend']
+    waitFor: ['build-backend']
 
   - name: 'gcr.io/cloud-builders/docker'
-    id: 'push-streamlit'
-    args: ['push', '--all-tags', 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app']
-    waitFor: ['build-streamlit']
+    id: 'push-frontend'
+    args: ['push', '--all-tags', 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/frontend-app']
+    waitFor: ['build-frontend']
 
-  # ── Deploy Serving ────────────────────────────────────────
+  # ── Deploy Backend ────────────────────────────────────────
   - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'deploy-serving'
+    id: 'deploy-backend'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        gcloud run deploy serving \
-          --image us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving:$_SHORT_SHA \
-          --port 8000 --memory 2Gi --cpu 1 \
-          --region us-east1 --allow-unauthenticated \
-          --set-env-vars "MLFLOW_TRACKING_URI=file:///app/mlruns,LOCAL=false"
-    waitFor: ['push-serving']
-
-  # ── Get Serving internal URL ──────────────────────────────
-  - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'get-serving-url'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        API_URL=$$(gcloud run services describe serving \
-          --region=us-east1 --format="value(status.url)")
-        echo "API_URL=$$API_URL" > /workspace/serving-url.env
-    waitFor: ['deploy-serving']
-
-  # ── Deploy Streamlit ──────────────────────────────────────
-  - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'deploy-streamlit'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        source /workspace/serving-url.env
-        QDRANT_HOST=$$(gcloud secrets versions access latest --secret=QDRANT_HOST)
-        QDRANT_API_KEY=$$(gcloud secrets versions access latest --secret=QDRANT_API_KEY)
         MONGO_URI=$$(gcloud secrets versions access latest --secret=MONGO_URI)
 
-        gcloud run deploy streamlit-app \
-          --image us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:$_SHORT_SHA \
-          --port 8501 --memory 2Gi --cpu 1 \
+        gcloud run deploy backend \
+          --image us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/backend:$_SHORT_SHA \
+          --port 8000 --memory 2Gi --cpu 1 \
           --region us-east1 --allow-unauthenticated \
-          --set-env-vars "API_URL=$$API_URL,QDRANT_HOST=$$QDRANT_HOST,QDRANT_API_KEY=$$QDRANT_API_KEY,MONGO_URI=$$MONGO_URI,LOCAL=false"
-    waitFor: ['push-streamlit', 'get-serving-url']
+          --set-env-vars "MONGO_URI=$$MONGO_URI,LOCAL=false"
+    waitFor: ['push-backend']
+
+  # ── Get Backend internal URL ──────────────────────────────
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'get-backend-url'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        API_URL=$$(gcloud run services describe backend \
+          --region=us-east1 --format="value(status.url)")
+        echo "API_URL=$$API_URL" > /workspace/backend-url.env
+    waitFor: ['deploy-backend']
+
+  # ── Deploy Frontend ──────────────────────────────────────
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'deploy-frontend'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        source /workspace/backend-url.env
+
+        gcloud run deploy frontend-app \
+          --image us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/frontend-app:$_SHORT_SHA \
+          --port 80 --memory 1Gi --cpu 1 \
+          --region us-east1 --allow-unauthenticated
+    waitFor: ['push-frontend', 'get-backend-url']
 
 substitutions:
   _SHORT_SHA: 'latest'
 
 images:
-  - 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/serving:latest'
-  - 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/streamlit-app:latest'
+  - 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/backend:latest'
+  - 'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/frontend-app:latest'
 
 options:
   defaultLogsBucketBehavior: REGIONAL_USER_OWNED_BUCKET

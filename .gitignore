@@ -12,9 +12,6 @@ wheels/
 # Enviorment variables
 .env
 
-# ze configurations
-.zen/
-
 # Data types
 *.csv
 *.parquet
@@ -27,4 +24,5 @@ models/
 
 # sh things
 cloud-setting.sh
-zenml-setup.sh
+
+*_pipeline.yaml
