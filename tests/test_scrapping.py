@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from pipelines.scrapping import scrape_properties_op, validate_scrapping_signature_op
 
 # Mock class to simulate Kubeflow Artifacts locally

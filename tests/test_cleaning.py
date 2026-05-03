@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from pipelines.cleaning import (
     remove_duplicates_by_source_op,
     remove_erroneous_values_op,
