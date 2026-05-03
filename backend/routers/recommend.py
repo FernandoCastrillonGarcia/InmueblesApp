@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-from utils import embed
-from database import get_db
+from backend.utils import embed
+from backend.database import get_db
 
 router = APIRouter()
 

@@ -16,21 +16,9 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - MONGO_LOCAL_URI=${MONGO_LOCAL_URI:-mongodb://mongo:27017}
+      - MONGO_URI=${MONGO_URI}
+      - LOCAL=false
       - MLFLOW_TRACKING_URI=file:///app/mlruns
     volumes:
       - ./mlruns:/app/mlruns # Mount models
-    depends_on:
-      - mongo
     restart: always
-
-  mongo:
-    image: mongo:6.0
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongodb_data:/data/db
-    restart: always
-
-volumes:
-  mongodb_data:

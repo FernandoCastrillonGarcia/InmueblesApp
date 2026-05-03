@@ -32,15 +32,24 @@ def train_model_op(model_type: str = "xgboost") -> str:
 
     # === 1. Load Data ===
     try:
+        # Initialize MLflow experiment before any logging
+        mlflow.set_tracking_uri("file://" + os.path.abspath("mlruns"))
+        mlflow.set_experiment("price_prediction_experiment")
+        
         client = MongoSingleton(local=False).client
         db = client["inmuebles_db"]
-        collection = db["properties"]
         print("📂 Loading data from MongoDB...")
-        cursor = collection.find({}, {'_id': 0, 'batch_id': 0, 'scraped_at': 0})
-        df = pd.DataFrame(list(cursor))
+        
+        df_arriendo = pd.DataFrame(list(db["Arriendo"].find({}, {'_id': 0, 'batch_id': 0, 'scraped_at': 0, 'embedding': 0})))
+        df_venta = pd.DataFrame(list(db["Venta"].find({}, {'_id': 0, 'batch_id': 0, 'scraped_at': 0, 'embedding': 0})))
+        
+        df = pd.concat([df_arriendo, df_venta], ignore_index=True)
+        
         df['PRICE'] = pd.to_numeric(df['PRICE'], errors='coerce')
         df['AREA'] = pd.to_numeric(df['AREA'], errors='coerce')
+        print('a')
         mlflow.log_param("data_source", "mongodb")
+        print('b')
     except Exception as e:
         print(f"⚠️ MongoDB load failed: {e}")
         scraped_files = glob('data/raw/properties_*.csv')
@@ -51,17 +60,19 @@ def train_model_op(model_type: str = "xgboost") -> str:
             latest_file = max(scraped_files, key=os.path.getctime)
             df = pd.read_csv(latest_file)
             mlflow.log_param("data_source", os.path.basename(latest_file))
-
+    print(1)
     # === 2. Drop Columns ===
-    with open('inmueblesapp/pipelines/utils/config.json', 'r') as f:
+    config_path = os.path.join(os.path.dirname(__file__), 'utils/config.json')
+    with open(config_path, 'r') as f:
         config_dict = json.load(f)
         
     y_column = config_dict['y_column']
     numeric_features = config_dict['numeric_features']
     categorical_features = config_dict['categorical_features']
     all_features = numeric_features + categorical_features
+    df = df.dropna(subset=y_column + all_features)
     df = df.loc[:, y_column + all_features]
-
+    print(2)
     # === 3. Fill Categorical ===
     for c in categorical_features:
         if pd.api.types.is_numeric_dtype(df[c]):
@@ -69,17 +80,17 @@ def train_model_op(model_type: str = "xgboost") -> str:
         elif pd.api.types.is_object_dtype(df[c]):
             df[c] = df[c].fillna('No se sabe')
     df[categorical_features] = df[categorical_features].astype('category')
-
+    print(3)
     # === 4. Manual Filtering ===
     df = df.loc[df['FLOOR'] != 202]
     df = df.loc[df['STRATUM'] != 101]
     apartment_mask = df['PROPERTY_TYPE'].isin(['Apartamento', 'Apartaestudio'])
     df.loc[apartment_mask] = df.loc[apartment_mask & (df['AREA'] < 400) & (df['AREA'] > 0) & (df['PRICE'] < 20_000_000) & (df['PRICE'] > 100_000)]
     df.dropna(inplace=True)
-
+    print(4)
     # === 5. Split Data ===
     X_train_raw, X_test_raw, y_train_raw, y_test = train_test_split(df[all_features], df[y_column], test_size=0.2, random_state=42)
-
+    print(5)
     # === 6. Build Pipelines ===
     numeric_transformer = Pipeline([
         ("imputer", SimpleImputer(strategy="median")),
@@ -97,11 +108,11 @@ def train_model_op(model_type: str = "xgboost") -> str:
         ("log_transform", FunctionTransformer(np.log1p, inverse_func=np.expm1)),
         ("quantile", QuantileTransformer(output_distribution='normal')),
     ])
-
+    print(6)
     # === 7. Process Data ===
     X_train_processed = X_preprocessor.fit_transform(X_train_raw)
     y_train_processed = y_preprocessor.fit_transform(y_train_raw)
-
+    print(7)
     # === 8. Train Model ===
     objectives = {"xgboost": op.objective_xgboost, "lightgbm": op.objective_lightgbm, "random_forest": op.objective_random_forest}
     models_map = {"xgboost": XGBRegressor, "lightgbm": LGBMRegressor, "random_forest": RandomForestRegressor}
@@ -110,7 +121,7 @@ def train_model_op(model_type: str = "xgboost") -> str:
     model_class = models_map[model_type]
     
     print(f"🔍 Optimizing {model_type} hyperparameters...")
-    best_params = op.optimize_hyperparameters(objective_func, X_train_processed, y_train_processed.ravel())
+    best_params = op.optimize_hyperparameters(objective_func, X_train_processed, y_train_processed.ravel(), n_trials=50)
     
     mlflow.log_params(best_params)
     mlflow.log_param("model_type", model_type)

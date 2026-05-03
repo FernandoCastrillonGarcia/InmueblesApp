@@ -4,13 +4,14 @@ import { Search as SearchIcon, MapPin, Bed, Bath, Maximize } from "lucide-react"
 export default function Recommend() {
   const [query, setQuery] = useState("");
   const [operation, setOperation] = useState("Arriendo");
+  const [property, SetProperty] = useState("Apartamento")
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState([]);
 
   const handleSearch = async (e) => {
     e.preventDefault();
     if (!query) return;
-    
+
     setLoading(true);
     try {
       const res = await fetch("/api/recommend", {
@@ -36,17 +37,25 @@ export default function Recommend() {
 
       <form onSubmit={handleSearch} className="glass-card p-6">
         <div className="flex flex-col md:flex-row gap-4">
-          <select 
-            value={operation} 
+          <select
+            value={operation}
             onChange={e => setOperation(e.target.value)}
             className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 md:w-48"
           >
             <option value="Arriendo">Arriendo</option>
             <option value="Venta">Venta</option>
           </select>
+          <select
+            value={property}
+            onChange={e => SetProperty(e.target.value)}
+            className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 md:w-48"
+          >
+            <option value="Casa">Casa</option>
+            <option value="Apartamento">Apartamento</option>
+          </select>
           <div className="relative flex-1">
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder="Ej: Apartamento moderno con balcón, cerca del metro, zona segura..."
@@ -54,8 +63,8 @@ export default function Recommend() {
             />
             <SearchIcon className="absolute left-4 top-3.5 text-slate-500" size={20} />
           </div>
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             disabled={loading}
             className="bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-medium py-3 px-8 rounded-xl transition-all shadow-lg shadow-indigo-500/25 disabled:opacity-50"
           >
@@ -79,7 +88,7 @@ export default function Recommend() {
               <p className="text-slate-300 text-sm mb-6 flex-1 line-clamp-3">
                 {r.DESCRIPTION || 'Sin descripción'}
               </p>
-              
+
               <div className="grid grid-cols-3 gap-4 border-t border-slate-700/50 pt-4 mb-4">
                 <div className="flex items-center gap-2 text-slate-400 text-sm">
                   <Maximize size={16} /> {r.AREA} m²
@@ -91,10 +100,10 @@ export default function Recommend() {
                   <Bath size={16} /> {r.BATHROOMS} Baños
                 </div>
               </div>
-              
-              <a 
-                href={r.LINK?.startsWith('http') ? r.LINK : `https://${r.LINK}`} 
-                target="_blank" 
+
+              <a
+                href={r.LINK?.startsWith('http') ? r.LINK : `https://${r.LINK}`}
+                target="_blank"
                 rel="noreferrer"
                 className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-center rounded-lg text-sm font-medium transition-colors border border-slate-700"
               >

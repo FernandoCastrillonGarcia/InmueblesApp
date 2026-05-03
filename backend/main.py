@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import predict, recommend, stats
+from backend.routers import predict, recommend, stats
 
 app = FastAPI(
     title="InmueblesApp Backend API",

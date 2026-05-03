@@ -95,13 +95,13 @@ def objective_elastic_net(trial, X=None, y=None):
 
 
 # Hyperparameters
-def optimize_hyperparameters(objective_func, X_train, y_train):
+def optimize_hyperparameters(objective_func, X_train, y_train, n_trials=50,n_jobs=-1):
     study = optuna.create_study(direction='minimize', sampler=optuna.samplers.RandomSampler(seed=42)) # Default is random Search
 
     objective = partial(objective_func, X=X_train, y = y_train)
     
     # Use it like this:
-    study.optimize(objective, n_trials=50, n_jobs=-1, show_progress_bar=True)
+    study.optimize(objective, n_trials=n_trials, n_jobs=n_jobs, show_progress_bar=True)
 
     best_params = study.best_params
     
