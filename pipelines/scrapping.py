@@ -154,6 +154,7 @@ def validate_scrapping_signature_op(
     current_stats.to_csv(comparison_out.path, index=False)
 
 
+
 @dsl.pipeline(
     name="inmueblesapp-scrapping-pipeline",
     description="Pipeline to scrape property data from Finca Raiz",
