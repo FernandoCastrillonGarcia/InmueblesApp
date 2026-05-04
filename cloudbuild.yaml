@@ -3,12 +3,22 @@
 #  Triggered manually or by CI/CD on push to main.
 # ============================================================
 steps:
+  # ── Download ML model from GCS ─────────────────────────────
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'download-model'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud storage cp -r gs://inmuebles-app-437-v2-ml-models/mlruns/ ./mlruns/
+
   # ── Build (parallel) ──────────────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build-backend'
     args: ['build', '-f', 'Dockerfile.backend', '-t',
            'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/backend:$_SHORT_SHA', '-t',
            'us-east1-docker.pkg.dev/$PROJECT_ID/inmuebles-app/backend:latest', '.']
+    waitFor: ['download-model']
 
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build-frontend'
