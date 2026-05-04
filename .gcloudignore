@@ -1,0 +1,28 @@
+# This file overrides .gitignore for gcloud builds submit
+# We need mlruns/ to be included so the trained model gets into the Docker image
+
+.git
+.gitignore
+.env
+.venv
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+frontend/node_modules/
+frontend/dist/
+frontend/.swc/
+node_modules/
+dist/
+build/
+*.log
+.DS_Store
+data/
+qdrant_storage/
+models/
+*_pipeline.yaml
