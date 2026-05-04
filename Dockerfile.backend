@@ -22,6 +22,9 @@ COPY backend/ /app/backend/
 # Copy pipelines source so the backend can deserialize MLflow models using custom functions
 COPY pipelines/ /app/pipelines/
 
+# Copy trained MLflow model artifacts so /api/predict works
+COPY mlruns/ /app/mlruns/
+
 # Expose port
 EXPOSE 8000
 
